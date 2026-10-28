@@ -280,10 +280,19 @@ def defense_stats(rows: list[dict], team: str) -> dict:
                 else:
                     stats["def_td"] += 1
 
-            if row.get("play_type") == "pass":
-                stats["pass_yds_allowed"] += _yards(row)
-            elif row.get("play_type") == "run":
-                stats["rush_yds_allowed"] += _yards(row)
+            # Net yards allowed must equal the opponent's team passing/rushing
+            # line on nfl.com's box score, so: two-point tries are excluded
+            # (nfl.com doesn't count them; they were adding e.g. a 2-yd try as
+            # 2 rushing yards allowed), and QB kneel-downs count as rushes
+            # with their negative yardage (they're in the team rushing total;
+            # excluding them overstated TB's week-4 rushing allowed by 12).
+            # Verified against nfl.com: DAL/PHI wk7 (204 team rush yds) and
+            # GB@TB wk4 (86).
+            if row.get("two_point_attempt") != "1":
+                if row.get("play_type") == "pass":
+                    stats["pass_yds_allowed"] += _yards(row)
+                elif row.get("play_type") in ("run", "qb_kneel"):
+                    stats["rush_yds_allowed"] += _yards(row)
 
         # Opponent's defense/special teams scoring against this team's own
         # offense. These are COUNTS, not points: the form's "-Pick/Fum 6" and

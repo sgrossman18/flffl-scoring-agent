@@ -266,6 +266,20 @@ in `stats.py`/`name_match.py`:
    it always shows a team's latest game), so a past week can't be re-opened
    and corrected by this tool.
 
+9. **Defensive rushing/passing yards allowed now match the opponent's team
+   line on nfl.com (fixed week 7).** `stats.defense_stats` summed yardage over
+   every `run`/`pass` play, which (a) included two-point tries, so a 2-yard
+   conversion run counted as 2 rushing yards allowed, and (b) left out QB
+   kneel-downs, which nfl.com counts in the team rushing total (e.g. GB's three
+   kneels lost 12 yards, so TB's week-4 rushing allowed was entered as 98
+   instead of 86). Two-point tries are now excluded and kneels included (the
+   same conventions the offensive side already used). Verified against nfl.com:
+   DAL@PHI wk7 (team rushing 204) and GB@TB wk4 (86). Reconciling every team's
+   rushing yards allowed against the opposing players' rushing totals went
+   from 90 mismatches in 214 team-games (weeks 1-7) to 0. Rushing/passing
+   yards-allowed boxes in weeks 1-6 were not re-entered; week 7 was re-filled
+   only for the teams whose numbers actually changed.
+
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
 STATS tab) the way this was caught.
