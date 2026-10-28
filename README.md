@@ -130,7 +130,10 @@ what was computed and (on a live run) entered for every player, tab by tab.
 3. Matches FLFFL's "Last, First" roster names to nflverse's "F.Last" names
    (`flffl_scorer/name_match.py`), scoped per-team so a last-name match is
    almost always unique. A player with no matching plays that week (DNP) is
-   left blank rather than filled with zeros.
+   left blank rather than filled with zeros. Nicknames the first-initial
+   check can't see (FLFFL lists "Drew", nflverse has "A.Ogletree") are handled
+   by an explicit `NAME_ALIASES` table in `flffl_scorer/config.py`, and a run
+   flags likely candidates as `possible_name_mismatch` weird plays.
 4. Logs into flffl.com, opens each assigned team's "enter stats" popup, and
    for each position tab fills in the raw counting stats — including the
    game score box at the top of every tab, which the site requires before it
@@ -279,6 +282,20 @@ in `stats.py`/`name_match.py`:
    from 90 mismatches in 214 team-games (weeks 1-7) to 0. Rushing/passing
    yards-allowed boxes in weeks 1-6 were not re-entered; week 7 was re-filled
    only for the teams whose numbers actually changed.
+
+10. **Nickname mismatches were silently skipped (fixed week 7).** The
+   first-initial safety check (item 2) rightly refuses to match "Ogletree,
+   Drew" to nflverse's "A.Ogletree" (Andrew "Drew" Ogletree, IND TE), so his
+   catches were never entered (2 rec / 12 yds in week 7, 1 rec / 4 yds in week
+   5). Loosening the check would reintroduce item 2, so instead there's an
+   explicit `config.NAME_ALIASES` table (an alias overrides matching entirely;
+   if the aliased player has no stats it's a DNP). Confirmed against nfl.com's
+   box score (A. OGLETREE, 2 rec, 12 yds). Scanning all 28 rosters across weeks
+   1-7 found no other case. To catch future ones, a run now reports a
+   `possible_name_mismatch` weird play when exactly one unmatched FLFFL name and
+   one unmatched player-with-stats share a last name; it only reports (those
+   stats are not entered) until someone confirms the pair and adds an alias.
+   Weeks 5 and 7 weren't re-entered.
 
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
