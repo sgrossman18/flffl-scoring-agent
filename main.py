@@ -206,7 +206,15 @@ def main():
     parser.add_argument("--headed", action="store_true", help="Show the browser window instead of running headless")
     parser.add_argument("--force", action="store_true", help="Re-fill teams even if their data and the code are unchanged since the last live fill")
     parser.add_argument("--refresh-stats", action="store_true", help="Force re-download of play-by-play data even if cached")
+    parser.add_argument("--window-check", action="store_true", help="Exit 0 if now is inside a scheduled-run window (Central time), 10 if not, without doing anything else; used by run_scheduled.sh")
+    parser.add_argument("--now", type=str, default=None, help="With --window-check: test this time instead of now (ISO, e.g. 2026-11-01T16:00; no offset = Central)")
     args = parser.parse_args()
+    if args.window_check:
+        now = datetime.fromisoformat(args.now) if args.now else None
+        inside = config.in_scoring_window(now)
+        shown = (now or config.schedule_now()).strftime("%a %Y-%m-%d %H:%M")
+        print(f"{shown} ({'Central' if not now or now.tzinfo is None else 'as given'}): {'INSIDE' if inside else 'outside'} the scoring windows")
+        sys.exit(0 if inside else 10)
     if args.week is None:
         args.week = config.resolve_current_week()
         print(f"--week not given, auto-detected as week {args.week}")

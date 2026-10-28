@@ -39,19 +39,21 @@ python main.py --week 1 --live --headed     # live, showing the browser so you c
 python main.py --week 1 --teams ARI,BUF     # only specific teams instead of all assigned ones
 ```
 
-`--week` defaults to today's date mapped onto the season schedule
-(`flffl_scorer/config.py`'s `resolve_current_week`). The week rolls over at
+`--week` defaults to today's date (in Central time, whatever timezone this Mac
+is in) mapped onto the season schedule (`flffl_scorer/config.py`'s
+`resolve_current_week`). The week rolls over at
 **midnight Wednesday**, not Tuesday, so Monday Night Football cleanup runs
 on Tuesday still target the week that just played. Update
 `SEASON_WEEK1_START` there at the start of each new season.
 
 ## Scheduled runs
 
-A launchd job (`com.flffl-scorer.weekly`, installed at
-`~/Library/LaunchAgents/com.flffl-scorer.weekly.plist`) runs `run_scheduled.sh`
-— which calls `main.py --live --refresh-stats` for the auto-detected current
-week — **hourly, on the hour, in three windows** (system local timezone; this
-Mac is set to America/Chicago, so that's Central time), 32 runs a week:
+A launchd job (`com.flffl-scorer.weekly`) fires `run_scheduled.sh` **every
+hour, on the hour**, and the script only goes ahead during three windows,
+judged in **Central time** (`config.RUN_HOURS`, 32 runs a week), by calling
+`main.py --window-check` first; outside a window it exits silently without
+logging anything. Inside one it runs `main.py --live --refresh-stats` for the
+auto-detected current week.
 
 - **Thursday 10 PM → Friday 6 AM** (Thursday Night Football)
 - **Sunday 4 PM → Monday 6 AM** (Sunday games)
@@ -67,6 +69,32 @@ Tuesday/Friday 8 AM safety-net runs. The Tuesday ones never actually worked: the
 target the *next* week and exit with "No play-by-play rows found". The last
 run in each window is now 6 AM, so a game whose data publishes later than
 that waits for the next window.)
+
+### Timezone
+
+The windows are defined in Central time, **not** the Mac's timezone. They
+used to be baked into the launchd job as local times, so when the Mac moved
+to Los Angeles every window silently ran 2 hours late in Central terms (and
+the week number, taken from the local date, flipped 2 hours late too). Now the
+job just fires hourly in whatever timezone the Mac is in, and the Central-time
+check (and the week calculation) happens in the code, including across
+daylight-saving changes. To ask "would a run fire at this time?":
+
+```bash
+python main.py --window-check                       # now
+python main.py --window-check --now 2026-11-01T16:00  # a time (no offset = Central)
+```
+
+(exit code 0 = inside a window, 10 = outside). To change the windows, edit
+`RUN_HOURS` in `flffl_scorer/config.py`; no launchd change is needed.
+
+The job is installed from a template tracked in this repo, so it can be
+reviewed and reproduced:
+
+```bash
+./install_schedule.sh          # writes ~/Library/LaunchAgents/com.flffl-scorer.weekly.plist for THIS folder and (re)loads it
+./install_schedule.sh --print  # just show the plist it would install
+```
 
 ### Repeat runs: skip-unchanged and de-duplicated notifications
 
@@ -109,7 +137,7 @@ launchctl print gui/$(id -u)/com.flffl-scorer.weekly
 launchctl bootout gui/$(id -u)/com.flffl-scorer.weekly
 
 # Re-enable it after stopping:
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.flffl-scorer.weekly.plist
+./install_schedule.sh
 
 # Trigger a run right now (for testing — this is a REAL --live run):
 launchctl kickstart -k gui/$(id -u)/com.flffl-scorer.weekly
@@ -329,5 +357,5 @@ STATS tab) the way this was caught.
 - `flffl_scorer/name_match.py` — FLFFL name ↔ nflverse name matching
 - `flffl_scorer/site.py` — Playwright browser automation
 - `flffl_scorer/config.py` — team codes, season schedule / current-week detection
-- `run_scheduled.sh` — wrapper the launchd job runs (see "Scheduled runs")
-- `~/Library/LaunchAgents/com.flffl-scorer.weekly.plist` — the launchd job itself
+- `run_scheduled.sh` — wrapper the launchd job runs every hour; it only acts inside the Central-time windows (see "Scheduled runs")
+- `launchd/com.flffl-scorer.weekly.plist.template` and `install_schedule.sh` — the launchd job definition and its installer

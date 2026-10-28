@@ -1,13 +1,23 @@
 #!/bin/bash
-# Run by launchd hourly in three windows (Thu 10pm-Fri 6am, Sun 4pm-Mon 6am,
-# Mon 11pm-Tue 6am) Central — see com.flffl-scorer.weekly.plist. Auto-detects the current
-# week and fills every assigned team live. Output goes to
-# logs/scheduled_runs.log in addition to the per-run JSON audit log
-# main.py always writes.
+# Fired by launchd EVERY HOUR (see launchd/com.flffl-scorer.weekly.plist.template);
+# it only does anything during the scoring windows, judged in Central time by
+# `main.py --window-check` (config.RUN_HOURS) so travelling or a changed Mac
+# timezone doesn't shift the schedule. Inside a window it auto-detects the
+# current week and fills every team on the scoring page live. Output goes to
+# logs/scheduled_runs.log in addition to the per-run JSON audit log main.py
+# always writes. Outside a window it exits silently and logs nothing.
 set -uo pipefail
 
 cd "$(dirname "$0")"
 mkdir -p logs
+
+# Exit code 10 = outside the windows: nothing to do. Any other non-zero code
+# means the check itself broke (e.g. the venv is missing) - fall through and
+# run, so the failure shows up in the log and as a notification.
+.venv/bin/python main.py --window-check >/dev/null 2>&1
+if [ $? -eq 10 ]; then
+    exit 0
+fi
 
 {
     echo "===== $(date) ====="
