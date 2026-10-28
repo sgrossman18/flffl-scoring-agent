@@ -77,6 +77,8 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
         "game_score": {"team": defense.get("team_total_pts"), "opponent": defense.get("opp_total_pts")},
     }
     known_qb_pbp_names: set[str] = set()
+    matched_offense: set[str] = set()
+    matched_kickers: set[str] = set()
 
     for tab in config.POSITION_TABS:
         site.click_position_tab(popup, tab)
@@ -107,6 +109,7 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
             else:
                 resolved[flffl_name] = source[pbp_name]
                 matched_by.setdefault(pbp_name, []).append(flffl_name)
+                (matched_kickers if tab == "Kickers" else matched_offense).add(pbp_name)
                 if tab == "Quarterbacks":
                     known_qb_pbp_names.add(pbp_name)
 
@@ -142,6 +145,25 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
 
         audit["teams"][team]["positions"][tab] = tab_audit
 
+    # A roster name that matched nobody plus a real player with stats who
+    # matched nobody, sharing one last name, is likely a nickname (FLFFL lists
+    # "Drew", nflverse has "A.Ogletree"). Report it so it can be confirmed and
+    # added to config.NAME_ALIASES instead of silently losing the stats.
+    unmatched = audit["teams"][team]["unmatched_players"]
+    for is_kicker, src, matched in ((False, offense, matched_offense), (True, kicking, matched_kickers)):
+        flffl_unmatched = sorted({u["name"] for u in unmatched if (u["tab"] == "Kickers") == is_kicker})
+        pbp_unmatched = [
+            p for p, s in src.items()
+            if p not in matched and (is_kicker or s["att"] + s["carries"] + s["rec"] > 0 or s["rec_yds"])
+        ]
+        for f, p in name_match.find_possible_nickname_mismatches(flffl_unmatched, pbp_unmatched):
+            s = src[p]
+            summary = (f"{s['fg_made']}/{s['fg_att']} FG, {s['xp_made']} XP" if is_kicker else
+                       f"{s['att']} att, {s['carries']} car, {s['rec']} rec, {s['pass_yds'] + s['rush_yds'] + s['rec_yds']} yds")
+            audit["teams"][team]["weird_plays"].append(
+                {"type": "possible_name_mismatch", "flffl": f, "pbp": p, "stats": summary}
+            )
+
     # Extend, don't replace: ambiguous-name-match warnings were already added
     # to this list while walking the tabs (an earlier version overwrote them).
     weird_plays = (
@@ -163,6 +185,8 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
                 note = ("entered as nfl.com credits it: first receiver up to the lateral, recipient gets the rest as receiving yards with 0 rec"
                         if w["kind"] == "reception" else "the second runner's yards were NOT entered anywhere — add by hand")
                 print(f"      - Lateral {w['kind']}: {w['from']} -> {w['to']} ({w['yards_after_lateral']} yds after the lateral{', TD' if w['touchdown'] else ''}); {note}")
+            elif w["type"] == "possible_name_mismatch":
+                print(f"      - Possible nickname: FLFFL '{w['flffl']}' matched nobody, but {w['pbp']} ({w['stats']}) shares the last name — if same person, add to NAME_ALIASES; their stats were NOT entered"  )
             elif w["type"] == "yardage_mismatch":
                 print(f"      - Yardage doesn't add up on a {w['kind']}: credited {w['credited_yards']} of {w['play_yards']} yds — check who should get the rest — \"{w['desc'].strip()}\"")
             elif w["type"] == "ambiguous_name_match":

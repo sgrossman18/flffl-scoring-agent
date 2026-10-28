@@ -13,6 +13,17 @@ POSITION_TABS = ["Quarterbacks", "Running Backs", "Receivers", "Kickers", "Defen
 # during a run, add an override here.
 TEAM_CODE_OVERRIDES: dict[str, str] = {}
 
+# FLFFL roster names that can't be matched automatically because FLFFL lists a
+# nickname while nflverse uses the legal first initial, mapped to the nflverse
+# "F.Last" name: {FLFFL roster name: nflverse name}. An alias overrides the
+# normal matching entirely (see name_match.match_player). Only add one after
+# confirming it's the same person, e.g. against nfl.com's box score — a wrong
+# alias writes one player's stats onto another's row. A run flags likely
+# candidates as "possible_name_mismatch" weird plays.
+NAME_ALIASES: dict[str, str] = {
+    "Ogletree, Drew": "A.Ogletree",  # IND TE Andrew "Drew" Ogletree; nfl.com lists him as A. Ogletree
+}
+
 DATA_CACHE_DIR = "data_cache"
 LOG_DIR = "logs"
 
