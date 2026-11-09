@@ -19,12 +19,26 @@ if [ $? -eq 10 ]; then
     exit 0
 fi
 
+# A normal run takes ~5 minutes. If the Mac sleeps mid-run the network
+# connection can die without ever erroring, leaving the process hung - and
+# launchd never starts a second copy of a job that's still running, so one
+# hung run silently blocked every later hourly run for 10 days (Oct 30 - Nov 8).
+# So cap each run: `perl alarm` delivers SIGALRM after RUN_TIMEOUT_SECS, which
+# kills Python (exit code 142 = 128 + SIGALRM). Perl ships with macOS, unlike
+# GNU `timeout`.
+RUN_TIMEOUT_SECS=1200
+
 {
     echo "===== $(date) ====="
     # Always force a fresh download: the play-by-play cache never expires on
     # its own (see stats.py), so a scheduled run that reused an
     # already-cached file from earlier in the day would miss a game that
     # finished since then — exactly what happened to the first Monday run.
-    .venv/bin/python main.py --live --refresh-stats
-    echo "----- exit code $? -----"
+    perl -e 'alarm shift; exec @ARGV' "$RUN_TIMEOUT_SECS" .venv/bin/python main.py --live --refresh-stats
+    code=$?
+    echo "----- exit code $code -----"
+    if [ "$code" -eq 142 ]; then
+        echo "TIMED OUT after ${RUN_TIMEOUT_SECS}s - run killed (the next hourly run will retry)"
+        osascript -e 'display notification "Scheduled run hung and was killed after 20 minutes. Log: ~/PycharmProjects/flffl-scorer/logs/scheduled_runs.log" with title "FLFFL scoring TIMED OUT"' >/dev/null 2>&1 || true
+    fi
 } >> logs/scheduled_runs.log 2>&1

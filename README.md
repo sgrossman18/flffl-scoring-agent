@@ -70,6 +70,11 @@ target the *next* week and exit with "No play-by-play rows found". The last
 run in each window is now 6 AM, so a game whose data publishes later than
 that waits for the next window.)
 
+Each scheduled run is capped at 20 minutes (`RUN_TIMEOUT_SECS` in
+`run_scheduled.sh`, enforced with perl's `alarm` since macOS has no GNU
+`timeout`). A run that hits the cap is killed, logs `TIMED OUT`, raises a
+macOS notification, and the next hourly run retries.
+
 ### Timezone
 
 The windows are defined in Central time, **not** the Mac's timezone. They
@@ -324,6 +329,16 @@ in `stats.py`/`name_match.py`:
    one unmatched player-with-stats share a last name; it only reports (those
    stats are not entered) until someone confirms the pair and adds an alias.
    Weeks 5 and 7 weren't re-entered.
+
+11. **One hung run silently blocked every later scheduled run (fixed week 9).**
+   The 2:06 AM Central run on Oct 30 hung (the Mac had gone back to sleep
+   mid-run, killing the network connection without raising an error) and never
+   exited. launchd doesn't start a new copy of a job that is still running, so
+   from then until it was noticed on Nov 8 - the Oct 30 - Nov 1 window, the
+   Nov 3 and Nov 5 windows, and the start of Nov 8 - no scheduled run happened
+   and `scheduled_runs.log` simply stopped growing. Manual runs kept working,
+   which hid it. Fix: `run_scheduled.sh` now kills any run after 20 minutes
+   (a normal run is ~5), logs `TIMED OUT`, and sends a notification.
 
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
