@@ -173,6 +173,7 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
         audit["teams"][team]["weird_plays"]
         + [{**w, "entered": w["player"] in entered_offense} for w in stats.find_return_tds(rows, team)]
         + stats.find_unrostered_players(offense, matched_offense)
+        + stats.find_unrostered_kickers(kicking, matched_kickers)
         + stats.find_unaccounted_touchdowns(rows, team)
         + stats.find_non_qb_passers(rows, team, known_qb_pbp_names)
         + stats.find_lateral_plays(rows, team)
@@ -189,7 +190,8 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
                          "NOT entered - returner isn't on your roster tabs (or matched ambiguously)")
                 print(f"      - Return TD: {w['player']} on a {w['play_type']} return, {w['yards']} yds — {where} — \"{w['desc'].strip()}\"")
             elif w["type"] == "player_not_on_roster":
-                print(f"      - Not on FLFFL's {team} roster: {w['player']} ({w['stats']}) — nothing was entered for them; if they were traded/signed, get them onto the roster (or enter by hand)")
+                role = "Kickers list" if w.get("role") == "kicker" else "roster"
+                print(f"      - Not on FLFFL's {team} {role}: {w['player']} ({w['stats']}) — nothing was entered for them; if they were traded/signed/released, get them onto the roster (or enter by hand)")
             elif w["type"] == "non_qb_passer":
                 print(f"      - Non-QB passing: {w['player']} attempted a pass — check offense stats for their passing line")
             elif w["type"] == "lateral_play":
