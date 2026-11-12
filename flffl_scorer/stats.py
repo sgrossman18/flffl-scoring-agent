@@ -429,6 +429,37 @@ def find_return_tds(rows: list[dict], team: str) -> list[dict]:
     ]
 
 
+def find_unrostered_players(offense: dict[str, dict], matched: set[str]) -> list[dict]:
+    """Players who ran, caught or returned for the team but matched nobody on
+    FLFFL's roster for it, so their stats were entered nowhere. Typically a
+    trade or signing FLFFL's roster hasn't caught up with (Audric Estime,
+    CLE -> NO, week 9: 15 carries / 72 yds / 1 TD with no row to put them on).
+
+    Pass-only players are left to find_non_qb_passers. A player matched to
+    more than one roster name is in `matched` too and is already reported as an
+    ambiguous_name_match. `matched` is the set of pbp names that matched a
+    FLFFL name; no activity threshold, since it's a handful of players a week
+    (13 across 30 teams in week 9).
+    """
+    found = []
+    for name, s in offense.items():
+        if name in matched:
+            continue
+        if not (s["carries"] or s["rec"] or s["rec_yds"] or s["return_td"]):
+            continue
+        found.append(
+            {
+                "type": "player_not_on_roster",
+                "player": name,
+                "stats": (
+                    f"{s['carries']} car, {s['rush_yds']} rush yds, {s['rec']} rec, {s['rec_yds']} rec yds, "
+                    f"{s['rush_td'] + s['rec_td']} TD"
+                ),
+            }
+        )
+    return found
+
+
 def find_yardage_anomalies(rows: list[dict], team: str) -> list[dict]:
     """Plays where the yards we credit to players don't add up to the play.
 
