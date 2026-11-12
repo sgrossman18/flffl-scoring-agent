@@ -204,6 +204,13 @@ entry. Nothing is auto-filled for these — they're flagged so you can
 calculate the right point value and enter it manually / message the
 commissioner, same as your normal workflow.
 
+It also reports **players not on FLFFL's roster** (`player_not_on_roster`): anyone
+who ran, caught or returned for the team but matched nobody on the team's form,
+so their stats went nowhere (usually a trade or signing FLFFL's roster hasn't
+caught up with). Nothing is entered for them. Pass-only players are left to the
+non-QB-passer flag, and there is no activity threshold (13 players across 30
+teams in week 9).
+
 The same `weird_plays` list also catches **ambiguous name matches**: if two
 different FLFFL roster entries ever match to the same real player (the
 `type` is `"ambiguous_name_match"`), neither gets filled and both are
@@ -372,6 +379,16 @@ in `stats.py`/`name_match.py`:
    kickoff return TDs against the kicking team were missed (NYJ, week 8).
    Same all-team-games comparison: only NYJ week 8 changes. (This replaces
    the old "Known limitations" entry that said these weren't backed out.)
+
+13. **A player missing from FLFFL's roster was silently dropped (fixed week 9).**
+   Audric Estime was traded CLE -> NO. FLFFL still listed him only on CLE (DNP),
+   not on NO's form, so his week-9 line (15 car / 72 yds / 1 TD, 1 rec / 5 yds,
+   verified against nfl.com) had nowhere to go, and nothing warned about it: the
+   nickname check only fires when an unmatched FLFFL name shares a last name with
+   an unmatched player. Now every such player is flagged as `player_not_on_roster`
+   (the same scan also showed NO's J.Tyson, 4 rec / 30 yds, off the roster). Once
+   the commissioner added Estime his line was entered by hand with a one-off script
+   (only his fields, leaving the rest of NO's form untouched).
 
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
