@@ -366,18 +366,19 @@ in `stats.py`/`name_match.py`:
    missed on the Defense tab (LV, week 8). Checked across all 272 team-games so
    far this season: only LV week 8 changes.
 
+   And a punt/kickoff return TD scored *against* a team now counts in that
+   team's **"-Pick/Fum 6"** box (the punting/kicking team's), so it's backed
+   out of points allowed. Punt return TDs were already counted by accident;
+   kickoff return TDs against the kicking team were missed (NYJ, week 8).
+   Same all-team-games comparison: only NYJ week 8 changes. (This replaces
+   the old "Known limitations" entry that said these weren't backed out.)
+
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
 STATS tab) the way this was caught.
 
 ## Known limitations
 
-- **Punt/kickoff return TD scored *against* your team's special teams**
-  isn't backed out of `opp_total_pts` (only turnover-return TDs and
-  safeties are, per the "-Pick/Fum 6" field). Rare; the weird-play detector
-  above will catch it on the *scoring* team's side, but the conceding
-  team's Points/Yards Allowed won't automatically exclude it — check by
-  hand if it happens.
 - **Two-point conversions**: FLFFL credits every offensive player involved
   (passer *and* rusher/receiver). The QB's single "2 Pt" box is filled with
   passing + rushing 2pt conversions combined; RB/WR's with

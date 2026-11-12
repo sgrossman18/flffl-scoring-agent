@@ -247,10 +247,9 @@ def kicking_stats(rows: list[dict], team: str) -> dict[str, dict]:
 def defense_stats(rows: list[dict], team: str) -> dict:
     """Team-level defensive stat line for `team`.
 
-    Known gap: a punt/kickoff return TD scored *against* this team's special
-    teams isn't backed out of opp_total_pts (only turnover-return TDs and
-    safeties are, matching the "-Pick/Fum 6" field literally). This is rare;
-    flagged in the audit report so it can be checked by hand if it happens.
+    A punt/kickoff return TD scored *against* this team's special teams is
+    counted in "-Pick/Fum 6" (like turnover-return TDs), so it is backed out
+    of points allowed.
     """
     team = _team_code(team)
     stats = {
@@ -337,8 +336,24 @@ def defense_stats(rows: list[dict], team: str) -> dict:
         # "-Safety" boxes are multiplied by 6 and 2 by the site's own JS
         # (CalculateOppDefPts). Entering points here (as the first weeks'
         # runs did) subtracted 6x / 2x too much from points allowed.
+        #
+        # A punt/kickoff return TD scored against this team also counts here
+        # (the punting/kicking team's box). It is keyed on td_team rather than
+        # posteam/defteam because nflverse lists the receiving team as posteam
+        # on kickoffs but the punting team as posteam on punts; the old
+        # posteam-keyed check counted punt return TDs by accident and missed
+        # every kickoff return TD against the kicking team.
+        is_kick_play = row.get("play_type") in ("kickoff", "punt")
+        if (
+            is_kick_play
+            and row.get("touchdown") == "1"
+            and row.get("td_team")
+            and row.get("td_team") != team
+            and team in (posteam, defteam)
+        ):
+            stats["opp_pick_fum6"] += 1
         if posteam == team and defteam and defteam != team:
-            if row.get("touchdown") == "1" and row.get("td_team") == defteam:
+            if row.get("touchdown") == "1" and row.get("td_team") == defteam and not is_kick_play:
                 stats["opp_pick_fum6"] += 1
             if row.get("safety") == "1":
                 stats["opp_safety"] += 1
