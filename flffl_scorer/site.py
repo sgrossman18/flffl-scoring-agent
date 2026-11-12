@@ -105,6 +105,7 @@ _DISCOVER_JS = r"""
                 player: currentPlayer,
                 section: currentSection,
                 label: cellTexts[j],
+                current: input.value,
             });
         }
     }
@@ -119,6 +120,7 @@ class FieldTarget:
     player: str
     section: str
     label: str
+    current: str = ""  # what the form holds right now (before we write anything)
 
 
 def discover_fields(page: Page) -> list[FieldTarget]:
