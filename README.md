@@ -178,15 +178,24 @@ what was computed and (on a live run) entered for every player, tab by tab.
 
 ## Weird plays
 
-Some scoring plays don't fit FLFFL's per-player form at all: a punt/kickoff
-return TD by an individual player (there's no return-TD field on their
-Rushing/Receiving row — only the team Defense tab has a Spec TD field, which
-doesn't credit the individual returner), or a non-QB throwing a pass (the
-RB/WR forms have no Passing section). `flffl_scorer/stats.py`'s
+Some scoring plays don't fit FLFFL's per-player form at all: a non-QB throwing a pass (the
+RB/WR forms have no Passing section), or any other touchdown that isn't a
+normal pass/rush/defensive TD. `flffl_scorer/stats.py`'s
 `find_unaccounted_touchdowns` and `find_non_qb_passers` catch these
 generically — any touchdown not explained by a normal pass/rush/def/special
 TD, or any pass attempt by someone not on the Quarterbacks tab — rather than
 trying to enumerate every possible trick play.
+
+**Punt/kickoff return TDs are the exception: they are entered.** The player
+forms have no return-TD field (the team Defense tab's Spec TD doesn't credit
+the individual returner), so the returner gets the TD in his **Rushing TD**
+box with 0 carries and 0 yards (FLFFL's rushing bonus only calculates when
+carries > 0, so a 0-carry TD can't trigger it). Which TD box is used doesn't
+matter for scoring. The play is still reported as a `return_td` weird play,
+saying whether it was entered. If the returner isn't on your roster tabs (or
+matched ambiguously) nothing is entered and the report says so. Plays where
+the ball changed hands on a fumble are left as flagged weird plays only,
+because the returner column can name the fumbler rather than the scorer.
 
 When a run finds one, it prints `⚠️ WEIRD PLAY` prominently to the console
 with the player, play type, yardage, and (for touchdowns) the full play
@@ -339,6 +348,16 @@ in `stats.py`/`name_match.py`:
    and `scheduled_runs.log` simply stopped growing. Manual runs kept working,
    which hid it. Fix: `run_scheduled.sh` now kills any run after 20 minutes
    (a normal run is ~5), logs `TIMED OUT`, and sends a notification.
+
+12. **Punt/kickoff return TDs weren't entered at all (fixed week 9).** They were
+   flagged as `unaccounted_touchdown` (kickoffs only; punt return TDs weren't
+   even flagged) and left for manual entry, so a returner with only a return
+   TD showed DNP (e.g. LV's Dylan Laube, 95-yd kickoff return TD, week 8).
+   Now the TD is added to the returner's Rushing TD box (0 carries / 0 yds)
+   and reported as `return_td`; see "Weird plays". Past weeks weren't
+   re-entered. Merging this changes the code fingerprint, so the next run
+   re-fills every team once, which overwrites any hand-entered adjustments on
+   already-filled teams for the current week.
 
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
