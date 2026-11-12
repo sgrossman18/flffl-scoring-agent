@@ -80,3 +80,10 @@ def resolve_current_week(today: datetime.date | None = None) -> int:
     days_since = (today - SEASON_WEEK1_START).days
     week = days_since // 7 + 1
     return max(1, min(18, week))
+
+# Manual-edit guard: before writing a player's fields, compare what the form
+# holds now with what this script last wrote. A difference means someone edited
+# the player by hand. "report" flags it but still fills (dry run of the guard);
+# "enforce" skips that player and flags it; "off" does nothing. Override per
+# run with --manual-guard; fix a flagged player on purpose with --force-player.
+MANUAL_EDIT_GUARD = "report"

@@ -151,6 +151,35 @@ launchctl kickstart -k gui/$(id -u)/com.flffl-scorer.weekly
 Every run — dry or live — writes a full audit log to `logs/` with exactly
 what was computed and (on a live run) entered for every player, tab by tab.
 
+### Manual-edit guard: don't overwrite scores someone changed by hand
+
+FLFFL shows no "last updated" time, so the script compares instead. After each
+live fill it records what it wrote for every player (in `logs/run_state.json`).
+On the next run, before typing anything, it reads the form's current values and
+compares them with that record:
+
+- **matches** (or nothing there yet): untouched, safe to update;
+- **differs** (`edited`): someone changed the player by hand, e.g. zeroed him or
+  typed a score;
+- **no record but values present** (`unrecorded`): entered by hand before we ever
+  wrote that player.
+
+A blank and a `0` count as the same. Anything flagged becomes a
+`manual_edit_detected` weird play (printed, in the audit log, and notified once).
+`--manual-guard` (default `config.MANUAL_EDIT_GUARD`) picks what happens next:
+
+- `report` (**the current default - the dry run**): flag it but still fill as before;
+- `enforce`: skip just that player (the rest of the team is still updated) and keep
+  the old record, so he stays flagged until someone deals with him;
+- `off`: no checking.
+
+To overwrite a flagged player on purpose, run with `--force-player "Last, First"`
+(several: separate with `;`). Not covered: a run that dies partway through a
+team can leave values with no record, which then show as `unrecorded` (harmless
+in `report`; in `enforce` fix it with `--force-player`). The plan is to leave it
+on `report` for a week of real forms, check the reports have no false alarms,
+then set `MANUAL_EDIT_GUARD = "enforce"`.
+
 ## How it works
 
 1. Downloads `play_by_play_<season>.csv` from nflverse (cached in

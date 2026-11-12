@@ -22,7 +22,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-from flffl_scorer import config, name_match, site, stats
+from flffl_scorer import config, manual_edits, name_match, site, stats
 from flffl_scorer import state as run_state
 
 
@@ -71,11 +71,19 @@ def build_position_fills(section: str, label: str, player_stats: dict | None) ->
     return None if value is None else str(value)
 
 
-def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dict, defense: dict, audit: dict, live: bool):
+def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dict, defense: dict, audit: dict, live: bool,
+                 guard: str = "off", prev_written: dict | None = None, force_players: frozenset = frozenset()):
+    """`guard` is the manual-edit guard mode (see manual_edits.py and
+    config.MANUAL_EDIT_GUARD); `prev_written` is what the last live run wrote
+    for this team ({"<tab>|<player>": {"<section>|<label>": value}}), None if
+    never filled. What this run leaves on the form is returned in
+    audit["teams"][team]["written"] for the caller to persist."""
     audit["teams"][team] = {
         "positions": {}, "unmatched_players": [], "weird_plays": [],
         "game_score": {"team": defense.get("team_total_pts"), "opponent": defense.get("opp_total_pts")},
     }
+    written_now: dict[str, dict] = dict(prev_written or {})
+    manual_flags: list[dict] = []
     known_qb_pbp_names: set[str] = set()
     matched_offense: set[str] = set()
     matched_kickers: set[str] = set()
@@ -137,14 +145,51 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
                 )
                 print(f"  ⚠️  WEIRD: {tab} — {flffl_names} all matched to the same real player ({pbp_name}); skipped filling all of them, needs manual review")
 
+        # Manual-edit guard: compare each player's current form values with
+        # what we last wrote. Judged before anything on this tab is typed.
+        planned: dict[str, dict[str, str]] = {}
+        skip_players: set[str] = set()
+        if guard != "off":
+            for flffl_name in players_in_tab:
+                mine = [t for t in targets if t.player == flffl_name]
+                planned[flffl_name] = {
+                    manual_edits.field_key(t.section, t.label): v
+                    for t in mine
+                    if (v := build_position_fills(t.section, t.label, resolved.get(flffl_name))) is not None
+                }
+                status, diffs = manual_edits.classify(
+                    {manual_edits.field_key(t.section, t.label): t.current for t in mine},
+                    (prev_written or {}).get(f"{tab}|{flffl_name}"),
+                )
+                if status == "clean" or flffl_name in force_players:
+                    continue
+                enforce = guard == "enforce"
+                if enforce:
+                    skip_players.add(flffl_name)
+                manual_flags.append(
+                    {
+                        "type": "manual_edit_detected", "tab": tab, "player": flffl_name, "status": status,
+                        "differences": diffs, "action": "skipped" if enforce else "report-only (still filled)",
+                    }
+                )
+                print(f"  ⚠️  {tab}: {flffl_name} was changed by hand ({status}) — "
+                      f"{'NOT overwriting' if enforce else 'guard is report-only, overwriting anyway'}")
+
         for t in targets:
             player_stats = resolved.get(t.player)
             value = build_position_fills(t.section, t.label, player_stats)
+            if t.player in skip_players:
+                value = None  # edited by hand: leave it alone
             tab_audit.append(
                 {"player": t.player, "section": t.section, "label": t.label, "value": value}
             )
             if live and value is not None:
                 site.fill_field(popup, t.tag, value)
+
+        if live and guard != "off":
+            for flffl_name, fields in planned.items():
+                if flffl_name not in skip_players:
+                    written_now[f"{tab}|{flffl_name}"] = fields
 
         audit["teams"][team]["positions"][tab] = tab_audit
 
@@ -172,6 +217,7 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
     weird_plays = (
         audit["teams"][team]["weird_plays"]
         + [{**w, "entered": w["player"] in entered_offense} for w in stats.find_return_tds(rows, team)]
+        + manual_flags
         + stats.find_unrostered_players(offense, matched_offense)
         + stats.find_unrostered_kickers(kicking, matched_kickers)
         + stats.find_unaccounted_touchdowns(rows, team)
@@ -192,6 +238,9 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
             elif w["type"] == "player_not_on_roster":
                 role = "Kickers list" if w.get("role") == "kicker" else "roster"
                 print(f"      - Not on FLFFL's {team} {role}: {w['player']} ({w['stats']}) — nothing was entered for them; if they were traded/signed/released, get them onto the roster (or enter by hand)")
+            elif w["type"] == "manual_edit_detected":
+                what = "; ".join(f"{d['field']}: form {d['form']!r} vs we wrote {d['we_wrote']!r}" for d in w["differences"][:4])
+                print(f"      - Manual edit on {w['tab']}: {w['player']} ({w['status']}; {what}) — {w['action']}. Use --force-player \"{w['player']}\" to overwrite on purpose")
             elif w["type"] == "non_qb_passer":
                 print(f"      - Non-QB passing: {w['player']} attempted a pass — check offense stats for their passing line")
             elif w["type"] == "lateral_play":
@@ -207,6 +256,7 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
 
     review_text = site.click_review_and_submit(popup, submit=live)
     audit["teams"][team]["review_text"] = review_text
+    audit["teams"][team]["written"] = written_now
     return weird_plays
 
 
@@ -219,6 +269,9 @@ def main():
     parser.add_argument("--headed", action="store_true", help="Show the browser window instead of running headless")
     parser.add_argument("--force", action="store_true", help="Re-fill teams even if their data and the code are unchanged since the last live fill")
     parser.add_argument("--refresh-stats", action="store_true", help="Force re-download of play-by-play data even if cached")
+    parser.add_argument("--manual-guard", choices=("off", "report", "enforce"), default=config.MANUAL_EDIT_GUARD,
+                        help="Players edited by hand since the last live fill: 'report' flags them but still fills, 'enforce' skips them (default: %(default)s)")
+    parser.add_argument("--force-player", type=str, default="", help="FLFFL name(s) ('Last, First'; separate several with ';') to overwrite even if edited by hand")
     parser.add_argument("--window-check", action="store_true", help="Exit 0 if now is inside a scheduled-run window (Central time), 10 if not, without doing anything else; used by run_scheduled.sh")
     parser.add_argument("--now", type=str, default=None, help="With --window-check: test this time instead of now (ISO, e.g. 2026-11-01T16:00; no offset = Central)")
     args = parser.parse_args()
@@ -272,6 +325,8 @@ def main():
 
         data_not_ready = []
         week_mismatch = []
+        # Names contain a comma ("Last, First"), so several are separated with ";".
+        force_players = frozenset(n.strip() for n in args.force_player.split(";") if n.strip())
         for team in teams:
             print(f"\n{team}:")
             offense = stats.offensive_player_stats(rows, team)
@@ -328,7 +383,12 @@ def main():
                 popup.close()
                 continue
             try:
-                weird = process_team(popup, team, rows, offense, kicking, defense, audit, live=args.live)
+                weird = process_team(
+                    popup, team, rows, offense, kicking, defense, audit, live=args.live,
+                    guard=args.manual_guard,
+                    prev_written=(prev or {}).get("written"),
+                    force_players=force_players,
+                )
             finally:
                 popup.close()
 
@@ -338,6 +398,7 @@ def main():
                 wk_st["teams"][team] = {
                     "data": data_fp, "code": code_fp,
                     "filled_at": datetime.now().isoformat(timespec="seconds"),
+                    "written": audit["teams"][team].get("written", {}),
                 }
                 if team in wk_st["alerted_not_ready"]:
                     wk_st["alerted_not_ready"].remove(team)
