@@ -77,11 +77,31 @@ def _is_2pt_success(row: dict) -> bool:
     return row.get("two_point_attempt") == "1" and row.get("two_point_conv_result") == "success"
 
 
+def _return_td_player(row: dict, team: str) -> str | None:
+    """The player who scored a punt/kickoff return TD for `team` on this play,
+    or None. Plays where the ball changed hands on a fumble are skipped: the
+    returner column can name the fumbler rather than the scorer there, so
+    those stay as flagged weird plays instead of guessing who scored.
+    """
+    if row.get("play_type") not in ("kickoff", "punt"):
+        return None
+    if row.get("touchdown") != "1" or row.get("td_team") != team:
+        return None
+    if row.get("fumble_recovery_1_player_name"):
+        return None
+    return row.get("kickoff_returner_player_name") or row.get("punt_returner_player_name") or None
+
+
 def offensive_player_stats(rows: list[dict], team: str) -> dict[str, dict]:
     """Return {pbp_player_name: stat_dict} for every skill player who touched the ball for `team`.
 
     pbp_player_name is nflverse's "F.Last" format (e.g. "J.Brissett") — match
     it to the FLFFL roster with name_match.match_player.
+
+    A punt/kickoff return TD has no field of its own on FLFFL's player forms,
+    so it is counted in the returner's Rushing TD box (0 carries, 0 yards -
+    FLFFL's rushing bonus only calculates when carries > 0). `return_td`
+    counts them separately so they can still be reported.
     """
     team = _team_code(team)
     players: dict[str, dict] = defaultdict(
@@ -89,10 +109,18 @@ def offensive_player_stats(rows: list[dict], team: str) -> dict[str, dict]:
             "comp": 0, "att": 0, "pass_yds": 0, "pass_td": 0, "int": 0, "pass_2pt": 0,
             "carries": 0, "rush_yds": 0, "rush_td": 0, "rush_2pt": 0,
             "rec": 0, "rec_yds": 0, "rec_td": 0, "rec_2pt": 0,
+            "return_td": 0,
         }
     )
 
     for row in rows:
+        # Before the posteam check: on a punt the returning team is the
+        # defense (defteam), so this row isn't one of its offensive plays.
+        returner = _return_td_player(row, team)
+        if returner:
+            players[returner]["rush_td"] += 1
+            players[returner]["return_td"] += 1
+
         if row.get("posteam") != team:
             continue
 
@@ -219,10 +247,9 @@ def kicking_stats(rows: list[dict], team: str) -> dict[str, dict]:
 def defense_stats(rows: list[dict], team: str) -> dict:
     """Team-level defensive stat line for `team`.
 
-    Known gap: a punt/kickoff return TD scored *against* this team's special
-    teams isn't backed out of opp_total_pts (only turnover-return TDs and
-    safeties are, matching the "-Pick/Fum 6" field literally). This is rare;
-    flagged in the audit report so it can be checked by hand if it happens.
+    A punt/kickoff return TD scored *against* this team's special teams is
+    counted in "-Pick/Fum 6" (like turnover-return TDs), so it is backed out
+    of points allowed.
     """
     team = _team_code(team)
     stats = {
@@ -267,6 +294,19 @@ def defense_stats(rows: list[dict], team: str) -> dict:
             if fumbled_team and recovery_team == team and fumbled_team != team:
                 stats["fum_rec"] += 1
 
+        # Spec TD: any punt/kickoff return TD scored by this team's returner.
+        # Judged by td_team, not defteam: nflverse lists the RECEIVING team as
+        # posteam on kickoffs (so the returning team is not defteam there) but
+        # as defteam on punts. Keying on defteam missed every kickoff return
+        # TD (LV's Laube, week 8).
+        is_return_td = (
+            row.get("touchdown") == "1"
+            and row.get("td_team") == team
+            and row.get("play_type") in ("kickoff", "punt")
+        )
+        if is_return_td:
+            stats["spec_td"] += 1
+
         if defteam == team:
             if row.get("sack") == "1":
                 stats["sack"] += 1
@@ -274,11 +314,8 @@ def defense_stats(rows: list[dict], team: str) -> dict:
                 stats["interceptions"] += 1
             if row.get("safety") == "1":
                 stats["safety"] += 1
-            if row.get("touchdown") == "1" and row.get("td_team") == team:
-                if row.get("play_type") in ("kickoff", "punt"):
-                    stats["spec_td"] += 1
-                else:
-                    stats["def_td"] += 1
+            if row.get("touchdown") == "1" and row.get("td_team") == team and not is_return_td:
+                stats["def_td"] += 1
 
             # Net yards allowed must equal the opponent's team passing/rushing
             # line on nfl.com's box score, so: two-point tries are excluded
@@ -299,8 +336,24 @@ def defense_stats(rows: list[dict], team: str) -> dict:
         # "-Safety" boxes are multiplied by 6 and 2 by the site's own JS
         # (CalculateOppDefPts). Entering points here (as the first weeks'
         # runs did) subtracted 6x / 2x too much from points allowed.
+        #
+        # A punt/kickoff return TD scored against this team also counts here
+        # (the punting/kicking team's box). It is keyed on td_team rather than
+        # posteam/defteam because nflverse lists the receiving team as posteam
+        # on kickoffs but the punting team as posteam on punts; the old
+        # posteam-keyed check counted punt return TDs by accident and missed
+        # every kickoff return TD against the kicking team.
+        is_kick_play = row.get("play_type") in ("kickoff", "punt")
+        if (
+            is_kick_play
+            and row.get("touchdown") == "1"
+            and row.get("td_team")
+            and row.get("td_team") != team
+            and team in (posteam, defteam)
+        ):
+            stats["opp_pick_fum6"] += 1
         if posteam == team and defteam and defteam != team:
-            if row.get("touchdown") == "1" and row.get("td_team") == defteam:
+            if row.get("touchdown") == "1" and row.get("td_team") == defteam and not is_kick_play:
                 stats["opp_pick_fum6"] += 1
             if row.get("safety") == "1":
                 stats["opp_safety"] += 1
@@ -339,6 +392,8 @@ def find_unaccounted_touchdowns(rows: list[dict], team: str) -> list[dict]:
             continue  # normal rushing TD — rusher row handles it
         if row.get("defteam") == team and row.get("touchdown") == "1":
             continue  # defensive/ST TD — Def TD or Spec TD field handles it
+        if _return_td_player(row, team):
+            continue  # individual return TD — entered as a Rushing TD; see find_return_tds
 
         weird.append(
             {
@@ -353,6 +408,25 @@ def find_unaccounted_touchdowns(rows: list[dict], team: str) -> list[dict]:
             }
         )
     return weird
+
+
+def find_return_tds(rows: list[dict], team: str) -> list[dict]:
+    """Punt/kickoff return TDs scored by `team`'s returner (see
+    offensive_player_stats, which enters them as a Rushing TD). Always
+    reported, so the commissioner note / manual double-check still happens.
+    """
+    team = _team_code(team)
+    return [
+        {
+            "type": "return_td",
+            "play_type": row.get("play_type"),
+            "player": _return_td_player(row, team),
+            "yards": int(float(row.get("return_yards") or 0)),  # yards_gained is 0 on returns
+            "desc": row.get("desc", ""),
+        }
+        for row in rows
+        if _return_td_player(row, team)
+    ]
 
 
 def find_yardage_anomalies(rows: list[dict], team: str) -> list[dict]:

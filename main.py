@@ -79,6 +79,7 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
     known_qb_pbp_names: set[str] = set()
     matched_offense: set[str] = set()
     matched_kickers: set[str] = set()
+    entered_offense: set[str] = set()  # matched to exactly one FLFFL player, so actually filled
 
     for tab in config.POSITION_TABS:
         site.click_position_tab(popup, tab)
@@ -120,6 +121,8 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
         # means any FUTURE name-format surprise gets flagged and refused
         # to fill, instead of silently duplicating data, the way that one
         # slipped through in week 1 before this check existed.
+        if tab != "Kickers":
+            entered_offense.update(n for n, f in matched_by.items() if len(f) == 1)
         for pbp_name, flffl_names in matched_by.items():
             if len(flffl_names) > 1:
                 for flffl_name in flffl_names:
@@ -168,6 +171,7 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
     # to this list while walking the tabs (an earlier version overwrote them).
     weird_plays = (
         audit["teams"][team]["weird_plays"]
+        + [{**w, "entered": w["player"] in entered_offense} for w in stats.find_return_tds(rows, team)]
         + stats.find_unaccounted_touchdowns(rows, team)
         + stats.find_non_qb_passers(rows, team, known_qb_pbp_names)
         + stats.find_lateral_plays(rows, team)
@@ -179,6 +183,10 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
         for w in weird_plays:
             if w["type"] == "unaccounted_touchdown":
                 print(f"      - Unaccounted TD: {w['player']} on a {w['play_type']} play, {w['yards']} yds — \"{w['desc'].strip()}\"")
+            elif w["type"] == "return_td":
+                where = ("entered as a Rushing TD (0 carries) on their row" if w["entered"] else
+                         "NOT entered - returner isn't on your roster tabs (or matched ambiguously)")
+                print(f"      - Return TD: {w['player']} on a {w['play_type']} return, {w['yards']} yds — {where} — \"{w['desc'].strip()}\"")
             elif w["type"] == "non_qb_passer":
                 print(f"      - Non-QB passing: {w['player']} attempted a pass — check offense stats for their passing line")
             elif w["type"] == "lateral_play":
