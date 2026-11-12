@@ -209,7 +209,12 @@ who ran, caught or returned for the team but matched nobody on the team's form,
 so their stats went nowhere (usually a trade or signing FLFFL's roster hasn't
 caught up with). Nothing is entered for them. Pass-only players are left to the
 non-QB-passer flag, and there is no activity threshold (13 players across 30
-teams in week 9).
+teams in week 9). **Kickers are checked too** (`find_unrostered_kickers`): a kicker
+with an extra-point or field-goal attempt who matches nobody on the team's
+Kickers list is reported the same way, since kickers are signed, released and
+re-signed all the time and FLFFL's roster is often the wrong one. Week 9 found
+two: BAL's J.Moody (1/1 FG, 1/1 XP; FLFFL lists only Tyler Loop) and NO's C.Smyth
+(3/4 FG, 2/2 XP; FLFFL lists only Daniel Carlson).
 
 The same `weird_plays` list also catches **ambiguous name matches**: if two
 different FLFFL roster entries ever match to the same real player (the

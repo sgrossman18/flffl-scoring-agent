@@ -460,6 +460,25 @@ def find_unrostered_players(offense: dict[str, dict], matched: set[str]) -> list
     return found
 
 
+def find_unrostered_kickers(kicking: dict[str, dict], matched: set[str]) -> list[dict]:
+    """Kickers who attempted an extra point or field goal for the team but
+    matched nobody on FLFFL's Kickers list for it. Kickers are signed, released
+    and re-signed constantly, so FLFFL's roster for a team is often the wrong
+    one (or missing him), and his kicking points would go nowhere. Same
+    `player_not_on_roster` report as find_unrostered_players.
+    """
+    return [
+        {
+            "type": "player_not_on_roster",
+            "role": "kicker",
+            "player": name,
+            "stats": f"{s['fg_made']}/{s['fg_att']} FG, {s['xp_made']}/{s['xp_made'] + s['xp_missed'] + s['xp_blocked']} XP",
+        }
+        for name, s in kicking.items()
+        if name not in matched and (s["fg_att"] or s["xp_made"] or s["xp_missed"] or s["xp_blocked"])
+    ]
+
+
 def find_yardage_anomalies(rows: list[dict], team: str) -> list[dict]:
     """Plays where the yards we credit to players don't add up to the play.
 
