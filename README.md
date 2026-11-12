@@ -359,6 +359,13 @@ in `stats.py`/`name_match.py`:
    re-fills every team once, which overwrites any hand-entered adjustments on
    already-filled teams for the current week.
 
+   The same fix covers the team **Defense "Spec TD"**: it counts every
+   punt/kickoff return TD by the team's returner. It was keyed on `defteam`,
+   which is right for punts but wrong for kickoffs (nflverse lists the
+   *receiving* team as `posteam` on kickoffs), so every kickoff return TD was
+   missed on the Defense tab (LV, week 8). Checked across all 272 team-games so
+   far this season: only LV week 8 changes.
+
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
 STATS tab) the way this was caught.

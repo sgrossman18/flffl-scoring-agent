@@ -295,6 +295,19 @@ def defense_stats(rows: list[dict], team: str) -> dict:
             if fumbled_team and recovery_team == team and fumbled_team != team:
                 stats["fum_rec"] += 1
 
+        # Spec TD: any punt/kickoff return TD scored by this team's returner.
+        # Judged by td_team, not defteam: nflverse lists the RECEIVING team as
+        # posteam on kickoffs (so the returning team is not defteam there) but
+        # as defteam on punts. Keying on defteam missed every kickoff return
+        # TD (LV's Laube, week 8).
+        is_return_td = (
+            row.get("touchdown") == "1"
+            and row.get("td_team") == team
+            and row.get("play_type") in ("kickoff", "punt")
+        )
+        if is_return_td:
+            stats["spec_td"] += 1
+
         if defteam == team:
             if row.get("sack") == "1":
                 stats["sack"] += 1
@@ -302,11 +315,8 @@ def defense_stats(rows: list[dict], team: str) -> dict:
                 stats["interceptions"] += 1
             if row.get("safety") == "1":
                 stats["safety"] += 1
-            if row.get("touchdown") == "1" and row.get("td_team") == team:
-                if row.get("play_type") in ("kickoff", "punt"):
-                    stats["spec_td"] += 1
-                else:
-                    stats["def_td"] += 1
+            if row.get("touchdown") == "1" and row.get("td_team") == team and not is_return_td:
+                stats["def_td"] += 1
 
             # Net yards allowed must equal the opponent's team passing/rushing
             # line on nfl.com's box score, so: two-point tries are excluded
