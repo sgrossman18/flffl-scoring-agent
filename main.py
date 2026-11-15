@@ -30,7 +30,20 @@ def notify_macos(title: str, message: str) -> None:
     """Best-effort macOS notification — used so an unattended (scheduled)
     run surfaces weird plays or failures even if nobody's watching the
     terminal. Never raises; a missing/failed osascript just means no
-    notification, not a broken run."""
+    notification, not a broken run.
+
+    On GitHub Actions (GITHUB_ACTIONS=true) there is no desktop to notify, so
+    the notification is appended to logs/notifications.jsonl instead and the
+    workflow's last step (ci/post_alerts.py) posts it to a GitHub issue."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        try:
+            print(f"  [notification] {title} — {message}")
+            os.makedirs(config.LOG_DIR, exist_ok=True)
+            with open(os.path.join(config.LOG_DIR, "notifications.jsonl"), "a") as f:
+                f.write(json.dumps({"title": title, "message": message}) + "\n")
+        except Exception:
+            pass
+        return
     try:
         import subprocess
 

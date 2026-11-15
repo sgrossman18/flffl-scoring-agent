@@ -1,0 +1,115 @@
+name: Score week
+
+# Runs the scorer in the cloud instead of on the Mac (see "Running in the cloud"
+# in the README). Hourly trigger; which hours actually do anything is decided in
+# Central time by `main.py --window-check` (config.RUN_HOURS), same as the Mac.
+#
+# SAFETY: scheduled runs do nothing until the repository variable CLOUD_LIVE is
+# set to "true" (Settings > Secrets and variables > Actions > Variables), so
+# merging this file can't start a second live scorer next to the Mac's.
+# Manual runs ("Run workflow") are a dry run unless you tick "live".
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Fill the FLFFL forms for real (unticked = dry run: logs in and reads, writes nothing)"
+        type: boolean
+        default: false
+
+# Never two scoring runs at once.
+concurrency:
+  group: flffl-score
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  score:
+    if: github.event_name == 'workflow_dispatch' || vars.CLOUD_LIVE == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      FLFFL_USERNAME: ${{ secrets.FLFFL_USERNAME }}
+      FLFFL_PASSWORD: ${{ secrets.FLFFL_PASSWORD }}
+      PYTHONUNBUFFERED: "1"
+      LIVE: ${{ github.event_name == 'schedule' || inputs.live }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Inside a scoring window?
+        id: window
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "inside=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          set +e
+          python main.py --window-check
+          code=$?
+          if [ "$code" -eq 10 ]; then echo "inside=false" >> "$GITHUB_OUTPUT"
+          elif [ "$code" -eq 0 ]; then echo "inside=true" >> "$GITHUB_OUTPUT"
+          else exit "$code"; fi
+
+      - name: Install Chromium
+        if: steps.window.outputs.inside == 'true'
+        run: playwright install --with-deps chromium
+
+      # logs/run_state.json is what lets repeat runs skip unchanged teams, remember
+      # what was written (manual-edit guard) and not repeat notifications. Each live
+      # run saves a new cache entry; restore-keys picks the newest one.
+      - name: Restore run state
+        if: steps.window.outputs.inside == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: logs/run_state.json
+          key: run-state-${{ github.run_id }}
+          restore-keys: run-state-
+
+      - name: Score
+        id: score
+        if: steps.window.outputs.inside == 'true'
+        run: |
+          if [ "$LIVE" = "true" ]; then
+            python main.py --live --refresh-stats
+          else
+            echo "DRY RUN - nothing will be written to FLFFL"
+            python main.py --refresh-stats
+          fi
+
+      - name: Save run state
+        if: always() && steps.window.outputs.inside == 'true' && env.LIVE == 'true' && hashFiles('logs/run_state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: logs/run_state.json
+          key: run-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # Backup copy in case the cache is ever evicted. (Contains scores and
+      # fingerprints only; no credentials.)
+      - name: Keep a copy of the run state
+        if: always() && steps.window.outputs.inside == 'true' && env.LIVE == 'true' && hashFiles('logs/run_state.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-state
+          path: logs/run_state.json
+          retention-days: 14
+
+      - name: Post alerts to the GitHub issue
+        if: always() && steps.window.outputs.inside == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SCORE_OUTCOME: ${{ steps.score.outcome }}
+          IS_LIVE: ${{ env.LIVE }}
+        run: python ci/post_alerts.py

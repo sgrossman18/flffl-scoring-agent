@@ -180,6 +180,46 @@ in `report`; in `enforce` fix it with `--force-player`). The plan is to leave it
 on `report` for a week of real forms, check the reports have no false alarms,
 then set `MANUAL_EDIT_GUARD = "enforce"`.
 
+## Running in the cloud (GitHub Actions)
+
+`.github/workflows/score.yml` runs the same scorer on GitHub's servers instead of
+the Mac, so a sleeping laptop can't cause missed runs. It triggers hourly and uses
+the same Central-time windows (`main.py --window-check`); each run is capped at
+25 minutes and runs never overlap. Free for a public repo.
+
+- **Credentials** are repository *secrets* (`FLFFL_USERNAME`, `FLFFL_PASSWORD`),
+  never in the repo. Set them yourself: `gh secret set FLFFL_USERNAME`, then
+  `gh secret set FLFFL_PASSWORD` (each prompts for the value).
+- **Run state** (`logs/run_state.json`) is kept in the Actions cache between runs,
+  with a 14-day backup copy as a workflow artifact. If it were ever lost, the next
+  run re-fills every team once (and, with the manual-edit guard, flags values it
+  has no record of).
+- **Alerts** replace the macOS notifications: `ci/post_alerts.py` posts new weird
+  plays, newly scored teams and failures to a standing issue titled "FLFFL scoring
+  alerts" (assigned to the repo owner, so the GitHub mobile app / email notifies).
+  The issue is public like the repo; it only contains team names and play text.
+- **Safety switch:** scheduled runs do nothing until the repository variable
+  `CLOUD_LIVE` is `true`. "Run workflow" by hand is a **dry run** (logs in and reads,
+  writes nothing) unless you tick "live".
+
+**Switching over** (do it between weeks, e.g. after Tuesday's last run and before
+Thursday 10 PM Central, so the new week has no state to carry across):
+1. Set the two secrets (above) and merge.
+2. Actions tab → *Score week* → *Run workflow* (leave "live" unticked) and check the
+   log shows `Logging in...` and the team list. This proves flffl.com accepts a
+   login from GitHub's servers.
+3. Turn the Mac's job off so two machines never fill live:
+   `launchctl bootout gui/$(id -u)/com.flffl-scorer.weekly`
+4. `gh variable set CLOUD_LIVE --body true`
+
+**Going back** to the Mac: `gh variable set CLOUD_LIVE --body false`, then
+`./install_schedule.sh`.
+
+Caveats: GitHub's cron can start a run 5-30 minutes late (fine for hourly runs);
+GitHub disables scheduled workflows in a public repo after 60 days without repo
+activity (re-enable on the Actions tab); and flffl.com could block cloud IP
+addresses, which step 2 would show.
+
 ## How it works
 
 1. Downloads `play_by_play_<season>.csv` from nflverse (cached in
