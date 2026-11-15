@@ -16,6 +16,7 @@ and let the page's own onkeyup handlers derive the rest.
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
 from dataclasses import dataclass, field
 
 from playwright.sync_api import Page, sync_playwright
@@ -143,12 +144,27 @@ def fill_field(page: Page, tag: str, value) -> bool:
     return True
 
 
+class LoginFailed(Exception):
+    """The site is still showing its login form after we submitted it."""
+
+
+def _where(page: Page) -> str:
+    """Where the browser is, for error messages. Path and title only: the
+    page body can hold the user's name and logs can be public."""
+    return f"path {urlparse(page.url).path!r}, title {page.title()!r}"
+
+
 def login(page: Page, username: str, password: str) -> None:
     page.goto(f"{config.FLFFL_BASE_URL}/index.php")
     page.fill("#UserName", username)
     page.fill("#Password", password)
     page.click("#loginbutton")
     page.wait_for_load_state("networkidle")
+    # A logged-in page has no login button (confirmed live). Without this check
+    # a refused login only showed up later as an empty team list.
+    if page.locator("#loginbutton").count() > 0:
+        raise LoginFailed(f"still on the login form after submitting it ({_where(page)}): "
+                          "wrong credentials, or the site is refusing this machine/IP")
 
 
 def get_assigned_teams(page: Page) -> list[dict]:

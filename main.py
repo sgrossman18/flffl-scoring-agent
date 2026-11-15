@@ -334,6 +334,9 @@ def main():
             teams = [t.strip().upper() for t in args.teams.split(",")]
         else:
             teams = [row["team"] for row in site.get_assigned_teams(page)]
+            if not teams:
+                # Don't let a run that saw nothing report success.
+                raise RuntimeError(f"the scoring-assignments page listed no teams ({site._where(page)})")
         print(f"Teams: {', '.join(teams)}")
 
         data_not_ready = []
