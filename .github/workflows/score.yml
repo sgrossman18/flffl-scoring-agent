@@ -18,6 +18,10 @@ on:
         description: "Fill the FLFFL forms for real (unticked = dry run: logs in and reads, writes nothing)"
         type: boolean
         default: false
+      debug:
+        description: "Instead of scoring, print what the login and the next page requests do (for diagnosing login trouble)"
+        type: boolean
+        default: false
 
 # Never two scoring runs at once.
 concurrency:
@@ -77,9 +81,13 @@ jobs:
           key: run-state-${{ github.run_id }}
           restore-keys: run-state-
 
+      - name: Debug login
+        if: inputs.debug == true
+        run: python ci/debug_login.py
+
       - name: Score
         id: score
-        if: steps.window.outputs.inside == 'true'
+        if: steps.window.outputs.inside == 'true' && inputs.debug != true
         run: |
           if [ "$LIVE" = "true" ]; then
             python main.py --live --refresh-stats
