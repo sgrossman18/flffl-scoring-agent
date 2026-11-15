@@ -217,8 +217,19 @@ Thursday 10 PM Central, so the new week has no state to carry across):
 
 Caveats: GitHub's cron can start a run 5-30 minutes late (fine for hourly runs);
 GitHub disables scheduled workflows in a public repo after 60 days without repo
-activity (re-enable on the Actions tab); and flffl.com could block cloud IP
-addresses, which step 2 would show.
+activity (re-enable on the Actions tab).
+
+**Known problem (found Nov 15, 2026): flffl.com refuses the login from GitHub's
+servers.** The login POST comes back `406 Not Acceptable!` (a web-server firewall
+response) from the runner, while the same login from the Mac works. Until that
+changes, the cloud job can't log in and must not be switched on (`CLOUD_LIVE`).
+The first dry run exposed it as "Teams:" with nothing after it, which looked like
+success; the scorer now fails loudly instead (`LoginFailed` / "listed no teams").
+To see what the login does on the runner, run the workflow with **debug** ticked
+(`ci/debug_login.py`: response codes, redirects, cookie names, outbound IP; no page
+text or credentials). Ways forward: ask whoever hosts flffl.com to allow the
+runner, or run the job from a machine whose IP the site accepts (an always-on
+computer at home, as a self-hosted runner), or keep the Mac awake.
 
 ## How it works
 

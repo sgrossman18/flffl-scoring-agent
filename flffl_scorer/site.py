@@ -16,9 +16,11 @@ and let the page's own onkeyup handlers derive the rest.
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
 from dataclasses import dataclass, field
 
 from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from . import config
 
@@ -143,12 +145,55 @@ def fill_field(page: Page, tag: str, value) -> bool:
     return True
 
 
+class LoginFailed(Exception):
+    """The site did not log us in."""
+
+
+_LOGGED_IN_MARKER = "text=Manage Roster"  # in the sidebar of every logged-in page (confirmed live)
+
+
+def _where(page: Page) -> str:
+    """Where the browser is, for error messages. Path and title only: the
+    page body can hold the user's name and logs can be public."""
+    return f"path {urlparse(page.url).path!r}, title {page.title()!r}"
+
+
+def describe_page(page: Page) -> str:
+    """Structural summary of the current page for error messages when it isn't
+    what we expected: where we are, how many tables and their header cells, and
+    any error/alert text. No general body text (it can hold the user's name and
+    run logs can be public)."""
+    info = page.evaluate(
+        r"""
+        () => ({
+            tables: Array.from(document.querySelectorAll('table')).map(t => ({
+                rows: t.querySelectorAll('tr').length,
+                head: Array.from((t.querySelector('tr') || {children: []}).children).slice(0, 8)
+                    .map(c => c.textContent.trim().slice(0, 25)),
+            })),
+            messages: Array.from(document.querySelectorAll('[class*=error i],[class*=alert i],[class*=warn i],[class*=message i]'))
+                .map(e => e.textContent.trim().replace(/\s+/g, ' ').slice(0, 160)).filter(Boolean).slice(0, 3),
+            bodyChars: document.body ? document.body.innerText.length : 0,
+        })
+        """
+    )
+    return f"{_where(page)}; {len(info['tables'])} tables {info['tables'][:4]}; messages {info['messages']}; {info['bodyChars']} body chars"
+
+
 def login(page: Page, username: str, password: str) -> None:
     page.goto(f"{config.FLFFL_BASE_URL}/index.php")
     page.fill("#UserName", username)
     page.fill("#Password", password)
     page.click("#loginbutton")
     page.wait_for_load_state("networkidle")
+    # Wait for proof of a logged-in page rather than assuming. A refused login
+    # used to show up only later as an empty team list: e.g. flffl.com answers a
+    # login from GitHub's cloud servers with HTTP 406 "Not Acceptable!".
+    try:
+        page.wait_for_selector(_LOGGED_IN_MARKER, timeout=15000)
+    except PlaywrightTimeoutError:
+        raise LoginFailed(f"not logged in after submitting the login form ({_where(page)}): "
+                          "wrong credentials, or the site is refusing this machine") from None
 
 
 def get_assigned_teams(page: Page) -> list[dict]:
