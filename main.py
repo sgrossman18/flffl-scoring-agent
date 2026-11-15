@@ -336,7 +336,7 @@ def main():
             teams = [row["team"] for row in site.get_assigned_teams(page)]
             if not teams:
                 # Don't let a run that saw nothing report success.
-                raise RuntimeError(f"the scoring-assignments page listed no teams ({site._where(page)})")
+                raise RuntimeError(f"the scoring-assignments page listed no teams ({site.describe_page(page)})")
         print(f"Teams: {', '.join(teams)}")
 
         data_not_ready = []

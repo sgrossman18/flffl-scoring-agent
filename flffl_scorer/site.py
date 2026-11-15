@@ -154,6 +154,28 @@ def _where(page: Page) -> str:
     return f"path {urlparse(page.url).path!r}, title {page.title()!r}"
 
 
+def describe_page(page: Page) -> str:
+    """Structural summary of the current page for error messages when it isn't
+    what we expected: where we are, how many tables and their header cells, and
+    any error/alert text. No general body text (it can hold the user's name and
+    run logs can be public)."""
+    info = page.evaluate(
+        """
+        () => ({
+            tables: Array.from(document.querySelectorAll('table')).map(t => ({
+                rows: t.querySelectorAll('tr').length,
+                head: Array.from((t.querySelector('tr') || {children: []}).children).slice(0, 8)
+                    .map(c => c.textContent.trim().slice(0, 25)),
+            })),
+            messages: Array.from(document.querySelectorAll('[class*=error i],[class*=alert i],[class*=warn i],[class*=message i]'))
+                .map(e => e.textContent.trim().replace(/\s+/g, ' ').slice(0, 160)).filter(Boolean).slice(0, 3),
+            bodyChars: document.body ? document.body.innerText.length : 0,
+        })
+        """
+    )
+    return f"{_where(page)}; {len(info['tables'])} tables {info['tables'][:4]}; messages {info['messages']}; {info['bodyChars']} body chars"
+
+
 def login(page: Page, username: str, password: str) -> None:
     page.goto(f"{config.FLFFL_BASE_URL}/index.php")
     page.fill("#UserName", username)
