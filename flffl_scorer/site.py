@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from dataclasses import dataclass, field
 
 from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from . import config
 
@@ -145,7 +146,10 @@ def fill_field(page: Page, tag: str, value) -> bool:
 
 
 class LoginFailed(Exception):
-    """The site is still showing its login form after we submitted it."""
+    """The site did not log us in."""
+
+
+_LOGGED_IN_MARKER = "text=Manage Roster"  # in the sidebar of every logged-in page (confirmed live)
 
 
 def _where(page: Page) -> str:
@@ -160,7 +164,7 @@ def describe_page(page: Page) -> str:
     any error/alert text. No general body text (it can hold the user's name and
     run logs can be public)."""
     info = page.evaluate(
-        """
+        r"""
         () => ({
             tables: Array.from(document.querySelectorAll('table')).map(t => ({
                 rows: t.querySelectorAll('tr').length,
@@ -182,11 +186,14 @@ def login(page: Page, username: str, password: str) -> None:
     page.fill("#Password", password)
     page.click("#loginbutton")
     page.wait_for_load_state("networkidle")
-    # A logged-in page has no login button (confirmed live). Without this check
-    # a refused login only showed up later as an empty team list.
-    if page.locator("#loginbutton").count() > 0:
-        raise LoginFailed(f"still on the login form after submitting it ({_where(page)}): "
-                          "wrong credentials, or the site is refusing this machine/IP")
+    # Wait for proof of a logged-in page rather than assuming. A refused login
+    # used to show up only later as an empty team list: e.g. flffl.com answers a
+    # login from GitHub's cloud servers with HTTP 406 "Not Acceptable!".
+    try:
+        page.wait_for_selector(_LOGGED_IN_MARKER, timeout=15000)
+    except PlaywrightTimeoutError:
+        raise LoginFailed(f"not logged in after submitting the login form ({_where(page)}): "
+                          "wrong credentials, or the site is refusing this machine") from None
 
 
 def get_assigned_teams(page: Page) -> list[dict]:
