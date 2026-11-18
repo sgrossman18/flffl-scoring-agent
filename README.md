@@ -114,6 +114,16 @@ write it):
   is left alone until that team's data actually changes. A code change
   (e.g. a stat-logic fix) forces everyone to be re-filled once. Pass
   `--force` to re-fill regardless.
+- **Roster retry.** If a team was filled while a real player with stats was
+  missing from FLFFL's roster (a traded/signed kicker, a new RB - the
+  `player_not_on_roster` flag), the team is *not* skipped as "unchanged" next
+  time. Every ~2.5 hours (`config.ROSTER_RETRY_MINUTES`) its form is re-opened
+  and checked again; the moment the commissioner adds the player, **only that
+  player** is filled. Everyone already on the form (and the game score) is left
+  completely alone, and a newly listed player whose boxes already hold values
+  (someone entered them by hand) is skipped too. You get one "newly rostered
+  player(s) filled" notification. A player who is never added (an unowned
+  backup) just keeps the flag, re-checked at that slow pace.
 - **One alert per event.** Notifications fire only for something new: a team
   newly scored or whose stats changed, a weird play not already alerted, or a
   team newly flagged "data not ready". A routine run with nothing new is
@@ -489,6 +499,18 @@ in `stats.py`/`name_match.py`:
    new code on all 300 team-games so far: only SF week 10 changes (Fum Rec 0
    -> 1). SF's week-10 form was corrected by hand with a one-off script
    (only the Fum Rec box).
+
+15. **Fixing FLFFL's roster never made the scorer pick the player up (fixed week
+   10).** ATL's Jake Moody and BAL's Riley Patterson were flagged
+   `player_not_on_roster` (FLFFL still listed Nick Folk on ATL and Moody on BAL),
+   which was correct - there was no box to type into. But once a team's stats are
+   filled, later runs skip it as "unchanged", and a roster fix changes no stats,
+   so the kickers stayed unscored until entered by hand. Teams with an unresolved
+   `player_not_on_roster` flag are now re-checked (see "Roster retry" above),
+   filling only newly listed players. Tested with a mocked form: newly listed
+   player filled and nothing else touched, hand-entered values left alone, still
+   missing -> nothing filled and the flag stays, a 30-minute-old check is
+   throttled without even opening the form.
 
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →

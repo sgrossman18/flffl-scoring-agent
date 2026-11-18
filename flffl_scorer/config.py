@@ -87,3 +87,8 @@ def resolve_current_week(today: datetime.date | None = None) -> int:
 # "enforce" skips that player and flags it; "off" does nothing. Override per
 # run with --manual-guard; fix a flagged player on purpose with --force-player.
 MANUAL_EDIT_GUARD = "report"
+
+# A team that was filled while a real player was missing from FLFFL's roster
+# (traded/signed kicker etc.) is re-checked for that player, but at most this
+# often - some missing players are never added (unowned backups).
+ROSTER_RETRY_MINUTES = 150
