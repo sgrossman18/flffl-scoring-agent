@@ -475,6 +475,21 @@ in `stats.py`/`name_match.py`:
    the commissioner added Estime his line was entered by hand with a one-off script
    (only his fields, leaving the rest of NO's form untouched).
 
+14. **A third fumble on one play was invisible (fixed week 10).** nflverse has
+   columns for only TWO fumble/recovery pairs per play. SF at DAL's final
+   play was a chain of laterals with three fumbles; the third (DAL's Steele,
+   forced by Prysock) was recovered by SF's M.Sigle but exists only in the
+   play description, so SF's "Fum Rec" was entered as 0 instead of 1 (worth
+   2 points). `stats._extra_fumbles_lost_by_opponent` now reads the
+   description for fumbles number 3 and up: the ball-holder is whoever
+   recovered the previous fumble, and it counts when our defense recovers a
+   fumble the other side was holding. Plays with a replay reversal are skipped
+   because their text describes both versions (e.g. PHI/JAX week 5 has three
+   "FUMBLES" in its text but they belong to a reversed play). Compared old vs.
+   new code on all 300 team-games so far: only SF week 10 changes (Fum Rec 0
+   -> 1). SF's week-10 form was corrected by hand with a one-off script
+   (only the Fum Rec box).
+
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
 STATS tab) the way this was caught.
