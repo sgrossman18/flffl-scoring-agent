@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 import urllib.request
 from collections import defaultdict
 
@@ -244,6 +245,40 @@ def kicking_stats(rows: list[dict], team: str) -> dict[str, dict]:
     return dict(kickers)
 
 
+_FUMBLE_RECOVERED_BY = re.compile(r"recovered by ([A-Z]{2,3})-", re.IGNORECASE)
+
+
+def _extra_fumbles_lost_by_opponent(row: dict, team: str) -> int:
+    """Fumbles beyond nflverse's two columns that the opponent lost to `team`.
+
+    nflverse has room for only TWO fumble/recovery pairs per play. A wild
+    lateral play can have more (week 10, SF at DAL, final play: three fumbles,
+    the third recovered by SF's M.Sigle), and the extras are simply absent from
+    the columns, so "Fum Rec" came out one short. The play description still
+    lists every fumble in order ("FUMBLES (...), RECOVERED by SF-36-M.Sigle"),
+    so for fumbles number 3 and up we read the text: the team that held the
+    ball is whoever recovered the previous fumble, and it counts for `team`
+    when `team` recovered a fumble the other side was holding. Plays with a
+    replay reversal are skipped (their text describes both versions).
+    """
+    desc = row.get("desc") or ""
+    if "REVERSED" in desc.upper():
+        return 0
+    chunks = re.split(r"FUMBLES", desc)[1:]  # one chunk per fumble, in order
+    if len(chunks) <= 2:
+        return 0
+    extra = 0
+    holder = None  # who held the ball going into this fumble
+    for i, chunk in enumerate(chunks):
+        m = _FUMBLE_RECOVERED_BY.search(chunk)
+        recoverer = m.group(1).upper() if m else None
+        if i >= 2 and recoverer == team and holder and holder != team:
+            extra += 1
+        if recoverer:
+            holder = recoverer
+    return extra
+
+
 def defense_stats(rows: list[dict], team: str) -> dict:
     """Team-level defensive stat line for `team`.
 
@@ -293,6 +328,7 @@ def defense_stats(rows: list[dict], team: str) -> dict:
             recovery_team = row.get(f"fumble_recovery_{slot}_team")
             if fumbled_team and recovery_team == team and fumbled_team != team:
                 stats["fum_rec"] += 1
+        stats["fum_rec"] += _extra_fumbles_lost_by_opponent(row, team)
 
         # Spec TD: any punt/kickoff return TD scored by this team's returner.
         # Judged by td_team, not defteam: nflverse lists the RECEIVING team as
