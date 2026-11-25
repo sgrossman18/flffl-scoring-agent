@@ -279,6 +279,25 @@ def _extra_fumbles_lost_by_opponent(row: dict, team: str) -> int:
     return extra
 
 
+def _fumble_lost_by_touchback(row: dict, team: str) -> bool:
+    """The opponent fumbled the ball out of `team`'s end zone: a touchback.
+
+    `team` gets the ball, and it is a fumble lost (nflverse sets `fumble_lost`
+    and the box score counts it), but no player recovers it, so the
+    recovery-team columns are empty and counting recoveries misses it (week 11:
+    BAL's J.Hill at the CAR 1, CAR's "Fum Rec" came out 2 instead of 3). Only
+    a play's LAST fumble can end that way.
+    """
+    slot = "2" if row.get("fumbled_2_team") else "1"
+    fumbled_team = row.get(f"fumbled_{slot}_team")
+    return bool(
+        row.get("fumble_lost") == "1"
+        and fumbled_team and fumbled_team != team
+        and not row.get(f"fumble_recovery_{slot}_team")
+        and "touchback" in (row.get("desc") or "").lower()
+    )
+
+
 def defense_stats(rows: list[dict], team: str) -> dict:
     """Team-level defensive stat line for `team`.
 
@@ -329,6 +348,8 @@ def defense_stats(rows: list[dict], team: str) -> dict:
             if fumbled_team and recovery_team == team and fumbled_team != team:
                 stats["fum_rec"] += 1
         stats["fum_rec"] += _extra_fumbles_lost_by_opponent(row, team)
+        if _fumble_lost_by_touchback(row, team):
+            stats["fum_rec"] += 1
 
         # Spec TD: any punt/kickoff return TD scored by this team's returner.
         # Judged by td_team, not defteam: nflverse lists the RECEIVING team as
