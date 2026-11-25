@@ -17,7 +17,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
@@ -85,12 +85,21 @@ def build_position_fills(section: str, label: str, player_stats: dict | None) ->
 
 
 def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dict, defense: dict, audit: dict, live: bool,
-                 guard: str = "off", prev_written: dict | None = None, force_players: frozenset = frozenset()):
+                 guard: str = "off", prev_written: dict | None = None, force_players: frozenset = frozenset(),
+                 new_players_only: bool = False):
     """`guard` is the manual-edit guard mode (see manual_edits.py and
     config.MANUAL_EDIT_GUARD); `prev_written` is what the last live run wrote
     for this team ({"<tab>|<player>": {"<section>|<label>": value}}), None if
     never filled. What this run leaves on the form is returned in
-    audit["teams"][team]["written"] for the caller to persist."""
+    audit["teams"][team]["written"] for the caller to persist.
+
+    `new_players_only` is the roster retry: the team's stats haven't changed,
+    but a real player was missing from FLFFL's roster at the last fill, so the
+    form is re-checked. Every player already on the form at the last fill
+    (a key in `prev_written`) is left completely alone - including the game
+    score - and only players who have appeared on it since are filled. A new
+    player whose boxes already hold values (someone entered them by hand) is
+    left alone too, whatever the guard mode."""
     audit["teams"][team] = {
         "positions": {}, "unmatched_players": [], "weird_plays": [],
         "game_score": {"team": defense.get("team_total_pts"), "opponent": defense.get("opp_total_pts")},
@@ -104,7 +113,7 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
 
     for tab in config.POSITION_TABS:
         site.click_position_tab(popup, tab)
-        if live:
+        if live and not new_players_only:
             site.fill_game_score(popup, defense.get("team_total_pts"), defense.get("opp_total_pts"))
         targets = site.discover_fields(popup)
         tab_audit = []
@@ -162,8 +171,12 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
         # what we last wrote. Judged before anything on this tab is typed.
         planned: dict[str, dict[str, str]] = {}
         skip_players: set[str] = set()
+        if new_players_only:
+            skip_players = {n for n in players_in_tab if f"{tab}|{n}" in (prev_written or {})}
         if guard != "off":
             for flffl_name in players_in_tab:
+                if flffl_name in skip_players:
+                    continue
                 mine = [t for t in targets if t.player == flffl_name]
                 planned[flffl_name] = {
                     manual_edits.field_key(t.section, t.label): v
@@ -176,7 +189,7 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
                 )
                 if status == "clean" or flffl_name in force_players:
                     continue
-                enforce = guard == "enforce"
+                enforce = guard == "enforce" or new_players_only
                 if enforce:
                     skip_players.add(flffl_name)
                 manual_flags.append(
@@ -270,6 +283,7 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
     review_text = site.click_review_and_submit(popup, submit=live)
     audit["teams"][team]["review_text"] = review_text
     audit["teams"][team]["written"] = written_now
+    audit["teams"][team]["new_players_only"] = new_players_only
     return weird_plays
 
 
@@ -321,7 +335,7 @@ def main():
     run_st = run_state.load() if args.live else {}
     wk_st = run_state.week_state(run_st, args.season, args.week)
     code_fp = run_state.code_fingerprint()
-    filled = {"new": [], "updated": [], "refreshed": []}
+    filled = {"new": [], "updated": [], "refreshed": [], "roster": []}
     new_weird = []
 
     with sync_playwright() as p:
@@ -356,11 +370,27 @@ def main():
             # left alone until the data actually changes. --force overrides.
             data_fp = run_state.data_fingerprint(offense, kicking, defense)
             prev = wk_st["teams"].get(team)
-            if (args.live and not args.force and (offense or kicking) and prev
-                    and prev.get("data") == data_fp and prev.get("code") == code_fp):
+            unchanged = bool(args.live and not args.force and (offense or kicking) and prev
+                             and prev.get("data") == data_fp and prev.get("code") == code_fp)
+            # Roster retry: unchanged stats, but a real player was missing from
+            # FLFFL's roster at the last fill (traded/signed kicker, etc.), so
+            # the commissioner may have fixed the roster since. Look again and
+            # fill only the players who have appeared; everyone else is left
+            # exactly as it is.
+            # Throttled: a player nobody ever adds (an unowned backup) would
+            # otherwise get this team re-opened every hour all week.
+            pending_roster = (prev or {}).get("pending_roster") or []
+            last_check = (prev or {}).get("roster_checked_at") or (prev or {}).get("filled_at")
+            due = (not last_check or datetime.now() - datetime.fromisoformat(last_check)
+                   >= timedelta(minutes=config.ROSTER_RETRY_MINUTES))
+            retry_roster = unchanged and bool(pending_roster) and due
+            if unchanged and not retry_roster:
                 print("  UNCHANGED since last fill — skipping (use --force to re-fill)")
                 audit["teams"][team] = {"skipped": "unchanged since last fill"}
                 continue
+            if retry_roster:
+                print(f"  RETRY: not on FLFFL's roster at the last fill: {', '.join(pending_roster)} — "
+                      "re-checking, filling only players newly listed (everyone else left alone)")
 
             page.goto(config.SCORING_ASSIGNMENTS_URL)
             page.wait_for_load_state("networkidle")
@@ -404,17 +434,31 @@ def main():
                     guard=args.manual_guard,
                     prev_written=(prev or {}).get("written"),
                     force_players=force_players,
+                    new_players_only=retry_roster,
                 )
             finally:
                 popup.close()
 
             if args.live:
-                kind = "new" if not prev else ("updated" if prev.get("data") != data_fp else "refreshed")
-                filled[kind].append(team)
+                written = audit["teams"][team].get("written", {})
+                still_missing = sorted(
+                    f"{w['player']} ({'kicker' if w.get('role') == 'kicker' else 'player'})"
+                    for w in weird if w["type"] == "player_not_on_roster"
+                )
+                newly_filled = sorted(set(written) - set((prev or {}).get("written", {}))) if retry_roster else []
+                if retry_roster:
+                    kind = "roster" if newly_filled else None
+                else:
+                    kind = "new" if not prev else ("updated" if prev.get("data") != data_fp else "refreshed")
+                if kind:
+                    filled[kind].append(team if kind != "roster" else f"{team} ({', '.join(k.split('|')[1] for k in newly_filled)})")
                 wk_st["teams"][team] = {
                     "data": data_fp, "code": code_fp,
-                    "filled_at": datetime.now().isoformat(timespec="seconds"),
-                    "written": audit["teams"][team].get("written", {}),
+                    "filled_at": (prev["filled_at"] if retry_roster and not newly_filled
+                                  else datetime.now().isoformat(timespec="seconds")),
+                    "written": written,
+                    "pending_roster": still_missing,
+                    "roster_checked_at": datetime.now().isoformat(timespec="seconds"),
                 }
                 if team in wk_st["alerted_not_ready"]:
                     wk_st["alerted_not_ready"].remove(team)
@@ -463,6 +507,11 @@ def main():
             notify_macos(
                 f"FLFFL: {len(newly_not_ready)} team(s) need a follow-up run",
                 f"{', '.join(newly_not_ready)} — game final but no stats data yet (retried automatically while the schedule runs).",
+            )
+        if filled["roster"]:
+            notify_macos(
+                f"FLFFL week {args.week}: newly rostered player(s) filled",
+                f"{', '.join(filled['roster'])} - they were missing from FLFFL's roster at the first fill.",
             )
         if filled["new"] or filled["updated"]:
             parts = []
