@@ -512,6 +512,17 @@ in `stats.py`/`name_match.py`:
    missing -> nothing filled and the flag stays, a 30-minute-old check is
    throttled without even opening the form.
 
+16. **A fumble lost through the end zone wasn't a "Fum Rec" (fixed week 11).**
+   BAL's J.Hill fumbled at the CAR 1 and the ball went out of bounds in the end
+   zone: a touchback, CAR ball. nflverse marks it `fumble_lost`, but no player
+   recovered it, so the recovery columns are empty and CAR's "Fum Rec" was
+   entered as 2 instead of 3. `stats._fumble_lost_by_touchback` now credits the
+   defense when the opponent's last fumble on a play is lost, has no recovering
+   team, and the play text says touchback. Compared old vs. new code on all
+   326 team-games so far: two change - CAR week 11 (2 -> 3) and ATL week 8
+   (0 -> 1; TB's B.Irving fumbled out of ATL's end zone). CAR's week-11 form
+   was corrected by hand (only the Fum Rec box). Week 8 was not re-entered.
+
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
 STATS tab) the way this was caught.
