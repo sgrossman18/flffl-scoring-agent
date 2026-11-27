@@ -269,6 +269,10 @@ def process_team(popup, team: str, rows: list[dict], offense: dict, kicking: dic
                 print(f"      - Manual edit on {w['tab']}: {w['player']} ({w['status']}; {what}) — {w['action']}. Use --force-player \"{w['player']}\" to overwrite on purpose")
             elif w["type"] == "non_qb_passer":
                 print(f"      - Non-QB passing: {w['player']} attempted a pass — check offense stats for their passing line")
+            elif w["type"] == "lateral_play" and w["kind"] == "multi_reception":
+                steps = ", ".join(f"{name} {yards:+d}" for name, yards in w["chain"])
+                print(f"      - Multi-lateral reception: {steps}{' (TD)' if w['touchdown'] else ''}; each entered as receiving yards "
+                      "(only the first gets a reception). A QB's receiving yards have no box on the form - check by hand")
             elif w["type"] == "lateral_play":
                 note = ("entered as nfl.com credits it: first receiver up to the lateral, recipient gets the rest as receiving yards with 0 rec"
                         if w["kind"] == "reception" else "the second runner's yards were NOT entered anywhere — add by hand")
