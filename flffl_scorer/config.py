@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 FLFFL_BASE_URL = "https://flffl.com/2026"
 LOGIN_URL = f"{FLFFL_BASE_URL}/index.php"
 SCORING_ASSIGNMENTS_URL = f"{FLFFL_BASE_URL}/scoring_assignments.php"
+RANKINGS_URL = f"{FLFFL_BASE_URL}/rankings.php"
 
 POSITION_TABS = ["Quarterbacks", "Running Backs", "Receivers", "Kickers", "Defense"]
 
@@ -92,3 +93,17 @@ MANUAL_EDIT_GUARD = "report"
 # (traded/signed kicker etc.) is re-checked for that player, but at most this
 # often - some missing players are never added (unowned backups).
 ROSTER_RETRY_MINUTES = 150
+
+# Playoff brackets (make_brackets.py). Keys are the names in rankings.php's
+# "Bowl" column; values are the titles printed on each bracket page, in the
+# order the pages come out. Each bowl takes 16 consecutive seeds.
+BOWLS: dict[str, str] = {
+    "Fingerlakes": "JOHN GORSKY FINGERLAKES BOWL (aka The Gorsky)",
+    "Cayuga": "CAYUGA BOWL",
+    "Seneca": "SENECA BOWL",
+    "Keuka": "KEUKA BOWL",
+    "Canandaigua": "CANANDAIGUA BOWL",
+}
+# The four playoff weeks are this one and the next three.
+PLAYOFF_FIRST_WEEK = 12
+BRACKETS_DIR = "brackets"
