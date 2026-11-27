@@ -527,6 +527,46 @@ If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
 STATS tab) the way this was caught.
 
+## Playoff brackets
+
+`make_brackets.py` builds the five bowls' playoff brackets as one PDF, one
+landscape page per bowl, ready to post on League News in place of the
+hand-made brackets used through 2025.
+
+```bash
+python make_brackets.py                                  # log in, read rankings.php, write brackets/FLFFL_Brackets_2026.pdf
+python make_brackets.py --rankings brackets/rankings_2026-11-26.json   # re-render saved seeds, no login
+python make_brackets.py --results results.json           # also fill in playoff scores
+```
+
+- **Seeds** come from the Rankings (Playoff Seeds) page (`rankings.php`, which
+  needs the `.env` login). Each team goes to the bowl in that page's Bowl
+  column (16 consecutive ranks per bowl, checked) and is seeded 1-16 within
+  it. Every live read saves the table to `brackets/rankings_<date>.json`.
+  Team names are printed as the site shows them, in capitals.
+- **Format** is the 2025 one: a fixed bracket with no reseeding, week 12
+  pairing 1v16, 8v9, 4v13, 5v12, 3v14, 6v11, 7v10, 2v15 top to bottom.
+  Every game's loser drops into the group playing for the places just below,
+  so every place from 1st to 16th is decided: first-round losers play for
+  9th-16th, second-round losers for 5th-8th, semifinal losers for 3rd, and
+  the consolation groups split the same way. Losers meet in bracket order
+  (the losers of 1v16 and 8v9 play each other). That is 8 games a week in
+  weeks 12-15. The regular season ends with week 11, so the rankings page's
+  seeds after week 11 are the final ones. The bowls, their page titles and
+  the first playoff week are set in `config.py` (`BOWLS`,
+  `PLAYOFF_FIRST_WEEK`).
+- **No prizes** are printed, only places.
+- **Results** are optional. Without them only week 12's matchups are filled
+  in. With `--results`, a JSON file of scores by week and team name
+  (`{"scores": {"12": {"TEXAS POKES": 201.5, ...}}}`) fills in scores,
+  advances winners and greys out losers. A tied game stops the run until its
+  winner is listed under `"tiebreak_winners": {"12": ["TEXAS POKES"]}`.
+  Pulling the weekly playoff scores from flffl.com automatically is not built
+  yet.
+
+Output goes to the gitignored `brackets/` folder: the PDF, plus the HTML it
+was printed from.
+
 ## Known limitations
 
 - **Two-point conversions**: FLFFL credits every offensive player involved
@@ -548,6 +588,7 @@ STATS tab) the way this was caught.
 - `flffl_scorer/stats.py` — nflverse data → stat lines, weird-play detection
 - `flffl_scorer/name_match.py` — FLFFL name ↔ nflverse name matching
 - `flffl_scorer/site.py` — Playwright browser automation
-- `flffl_scorer/config.py` — team codes, season schedule / current-week detection
+- `flffl_scorer/config.py` — team codes, season schedule / current-week detection, bowls
+- `make_brackets.py` and `flffl_scorer/brackets.py` — playoff bracket PDF (see "Playoff brackets")
 - `run_scheduled.sh` — wrapper the launchd job runs every hour; it only acts inside the Central-time windows (see "Scheduled runs")
 - `launchd/com.flffl-scorer.weekly.plist.template` and `install_schedule.sh` — the launchd job definition and its installer
