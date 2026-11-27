@@ -534,16 +534,18 @@ landscape page per bowl, ready to post on League News in place of the
 hand-made brackets used through 2025.
 
 ```bash
-python make_brackets.py                                  # log in, read rankings.php, write brackets/FLFFL_Brackets_2026.pdf
-python make_brackets.py --rankings brackets/rankings_2026-11-26.json   # re-render saved seeds, no login
-python make_brackets.py --results results.json           # also fill in playoff scores
+python make_brackets.py                                  # log in, read seeds + playoff scores, write brackets/FLFFL_Brackets_2026.pdf
+python make_brackets.py --snapshot brackets/snapshot_2026-12-02.json   # re-render a saved read, no login
+python make_brackets.py --results results.json           # take scores from a hand-written file instead
 ```
+
+(Use `.venv/bin/python` if the venv isn't activated; see "Usage".) The PDF
+only changes when you run this: nothing runs it on a schedule.
 
 - **Seeds** come from the Rankings (Playoff Seeds) page (`rankings.php`, which
   needs the `.env` login). Each team goes to the bowl in that page's Bowl
   column (16 consecutive ranks per bowl, checked) and is seeded 1-16 within
-  it. Every live read saves the table to `brackets/rankings_<date>.json`.
-  Team names are printed as the site shows them, in capitals.
+  it. Team names are printed as the site shows them, in capitals.
 - **Format** is the 2025 one: a fixed bracket with no reseeding, week 12
   pairing 1v16, 8v9, 4v13, 5v12, 3v14, 6v11, 7v10, 2v15 top to bottom.
   Every game's loser drops into the group playing for the places just below,
@@ -556,13 +558,30 @@ python make_brackets.py --results results.json           # also fill in playoff 
   the first playoff week are set in `config.py` (`BOWLS`,
   `PLAYOFF_FIRST_WEEK`).
 - **No prizes** are printed, only places.
-- **Results** are optional. Without them only week 12's matchups are filled
-  in. With `--results`, a JSON file of scores by week and team name
-  (`{"scores": {"12": {"TEXAS POKES": 201.5, ...}}}`) fills in scores,
-  advances winners and greys out losers. A tied game stops the run until its
-  winner is listed under `"tiebreak_winners": {"12": ["TEXAS POKES"]}`.
-  Pulling the weekly playoff scores from flffl.com automatically is not built
-  yet.
+- **Scores** come from the Match-Ups by Week page (`match_ups.php`), read
+  for each playoff week the page offers. The site marks each game's winner
+  (blue, and a `*` on a tie's winner), and the bracket advances exactly the
+  team the site marked, so ties follow the site's own tie-break rules.
+- **Only finished weeks advance teams.** A week counts as finished once the
+  next one has started (the week rolls over at midnight Wednesday, Central,
+  as in "Usage"). Before that, the week's scores so far are printed but
+  nobody moves on, and the page subtitle says "week N in progress". If the
+  site's scores for a week come in late, pass `--final-through N` to say
+  which week is the last finished one.
+- **Pairings are cross-checked.** For every week the site has posted, each
+  bracket game is compared with the site's pairing (the site posts each
+  week's playoff pairings, by bowl, before it's played). Any difference is
+  printed as a WARNING and the script exits with code 3. It would mean the
+  site seeds or pairs a round differently from this bracket, so check the
+  PDF before posting it.
+- **Snapshots:** every live read saves the rankings and the playoff weeks'
+  games to `brackets/snapshot_<date>.json`, which `--snapshot` re-renders
+  without logging in.
+- **Hand-written results** (`--results`) replace the site's scores: a JSON
+  file of scores by week and team name
+  (`{"scores": {"12": {"TEXAS POKES": 201.5, ...}}}`) in which every week
+  counts as finished and the higher score wins. A tied game stops the run
+  until its winner is listed under `"tiebreak_winners": {"12": ["TEXAS POKES"]}`.
 
 Output goes to the gitignored `brackets/` folder: the PDF, plus the HTML it
 was printed from.
