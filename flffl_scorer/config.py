@@ -7,6 +7,7 @@ FLFFL_BASE_URL = "https://flffl.com/2026"
 LOGIN_URL = f"{FLFFL_BASE_URL}/index.php"
 SCORING_ASSIGNMENTS_URL = f"{FLFFL_BASE_URL}/scoring_assignments.php"
 RANKINGS_URL = f"{FLFFL_BASE_URL}/rankings.php"
+MATCHUPS_URL = f"{FLFFL_BASE_URL}/match_ups.php"
 
 POSITION_TABS = ["Quarterbacks", "Running Backs", "Receivers", "Kickers", "Defense"]
 

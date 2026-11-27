@@ -155,6 +155,76 @@ def seeds_by_bowl(rankings: list[dict]) -> dict[str, list[Team]]:
     return out
 
 
+# --- match_ups.php ---------------------------------------------------------
+
+# Run in any logged-in flffl.com page: POST the week picker on match_ups.php
+# for one week and return its games. A scored row is
+#   # | name A | score A | vs | score B | name B
+# with the winner's two cells classed "bluefade" (a tie's winner by the site's
+# tie-break rules also gets a leading "*"). A playoff week posted before any
+# scores has just  # | name A | vs | name B,  and prefixes names with the
+# overall rank ("#1 TEXAS POKES (G4)"). So each side is read from the cells
+# on its side of "vs": the one holding a bold <span> is the name, a numeric
+# one is the score.
+_MATCHUPS_JS = """
+async (week) => {
+  const html = await fetch(location.origin + PATH, {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'Week=' + encodeURIComponent(week),
+  }).then(r => r.text());
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const weeks = [...doc.querySelectorAll('select[name=Week] option')].map(o => parseInt(o.value, 10));
+  const side = cells => {
+    const nameCell = cells.find(c => c.querySelector('span'));
+    const scoreCell = cells.find(c => c !== nameCell && /^-?\\d+(\\.\\d+)?$/.test(c.textContent.trim()));
+    return {
+      name: nameCell ? nameCell.querySelector('span').textContent.trim() : null,
+      score: scoreCell ? parseFloat(scoreCell.textContent.trim()) : null,
+      blue: cells.some(c => c.classList.contains('bluefade')),
+    };
+  };
+  const games = [];
+  for (const row of doc.querySelectorAll('tr')) {
+    const td = [...row.children].filter(c => c.tagName === 'TD');
+    const vs = td.findIndex(c => c.textContent.trim() === 'vs');
+    if (vs < 2) continue;
+    const a = side(td.slice(1, vs)), b = side(td.slice(vs + 1));
+    if (!a.name || !b.name) continue;
+    games.push({a: a.name, score_a: a.score, b: b.name, score_b: b.score,
+                winner: a.blue && !b.blue ? 'a' : b.blue && !a.blue ? 'b' : null});
+  }
+  return {weeks, games};
+}
+"""
+
+
+def clean_team_name(raw: str) -> str:
+    """'*#12 ORKIN GRINDERS (P2)' -> 'ORKIN GRINDERS'."""
+    name = raw.strip().lstrip("*").strip()
+    name = re.sub(r"^#\d+\s+", "", name)
+    name = re.sub(r"\s*\([A-Z]\d+\)$", "", name)
+    return name.strip()
+
+
+def read_matchups(page, weeks: list[int]) -> dict[int, list[dict]]:
+    """Games for each of `weeks` that match_ups.php offers, as
+    {week: [{'a', 'b', 'score_a', 'score_b', 'winner': 'a'|'b'|None}]}.
+    `page` must be a logged-in flffl.com page."""
+    js = _MATCHUPS_JS.replace("PATH", json.dumps(config.MATCHUPS_URL.split("flffl.com", 1)[1]))
+    out: dict[int, list[dict]] = {}
+    offered = None
+    for week in weeks:
+        if offered is not None and week not in offered:
+            continue
+        data = page.evaluate(js, week)
+        offered = set(data["weeks"])
+        if week not in offered:
+            continue
+        out[week] = [{**g, "a": clean_team_name(g["a"]), "b": clean_team_name(g["b"])} for g in data["games"]]
+    return out
+
+
 # --- results ---------------------------------------------------------------
 
 def _norm(name: str) -> str:
@@ -163,24 +233,53 @@ def _norm(name: str) -> str:
 
 class Results:
     """Playoff scores, keyed by week then team name (matched ignoring case and
-    punctuation). JSON shape:
+    punctuation), plus which weeks are final.
+
+    From flffl.com (from_matchups): a final week's winners are the ones the
+    site marks, which settles ties by the site's tie-break rules. A week that
+    isn't final yet shows its scores so far but advances nobody.
+
+    From a hand-written JSON file (load), every week counts as final and the
+    higher score wins:
 
         {"scores": {"12": {"TEXAS POKES": 201, "MATT'S MILITIA": 188, ...}, ...},
          "tiebreak_winners": {"12": ["TEXAS POKES"]}}
 
-    A tied game needs its winner listed under tiebreak_winners for that week.
+    A tied game there needs its winner listed under tiebreak_winners.
     """
 
-    def __init__(self, scores: dict | None = None, tiebreak_winners: dict | None = None):
-        self.scores = {int(w): {_norm(n): float(s) for n, s in teams.items()}
+    def __init__(self, scores: dict | None = None, tiebreak_winners: dict | None = None,
+                 site_winners: dict | None = None, live_weeks: set[int] | None = None):
+        self.scores = {int(w): {_norm(n): float(s) for n, s in teams.items() if s is not None}
                        for w, teams in (scores or {}).items()}
         self.tiebreak = {int(w): {_norm(n) for n in names} for w, names in (tiebreak_winners or {}).items()}
+        self.site_winners = {int(w): {_norm(n) for n in names} for w, names in (site_winners or {}).items()}
+        self.live_weeks = set(live_weeks or ())
 
     @classmethod
     def load(cls, path: str) -> "Results":
         with open(path) as f:
             data = json.load(f)
         return cls(data.get("scores"), data.get("tiebreak_winners"))
+
+    @classmethod
+    def from_matchups(cls, matchups: dict[int, list[dict]], final_through: int) -> "Results":
+        """Scores from read_matchups(); weeks after `final_through` are in progress."""
+        scores: dict[int, dict] = {}
+        winners: dict[int, list[str]] = {}
+        for week, games in matchups.items():
+            week = int(week)
+            for g in games:
+                scores.setdefault(week, {})[g["a"]] = g["score_a"]
+                scores.setdefault(week, {})[g["b"]] = g["score_b"]
+                if g["winner"] and week <= final_through:
+                    winners.setdefault(week, []).append(g[g["winner"]])
+        live = {int(w) for w in matchups if int(w) > final_through}
+        return cls(scores, site_winners=winners, live_weeks=live)
+
+    @property
+    def weeks_with_scores(self) -> list[int]:
+        return sorted(w for w, s in self.scores.items() if s)
 
     def score(self, week: int, team: Team) -> float | None:
         return self.scores.get(week, {}).get(_norm(team.name))
@@ -189,7 +288,15 @@ class Results:
         if game.a is None or game.b is None:
             return
         game.score_a, game.score_b = self.score(game.week, game.a), self.score(game.week, game.b)
-        if game.score_a is None or game.score_b is None:
+        if game.score_a is None or game.score_b is None or game.week in self.live_weeks:
+            return
+        if game.week in self.site_winners:
+            marked = self.site_winners[game.week]
+            a_in, b_in = _norm(game.a.name) in marked, _norm(game.b.name) in marked
+            if a_in != b_in:
+                game.winner, game.loser = (game.a, game.b) if a_in else (game.b, game.a)
+            # Neither or both marked: the site's pairing differs from the
+            # bracket's (check_pairings reports it), so leave it undecided.
             return
         if game.score_a != game.score_b:
             a_wins = game.score_a > game.score_b
@@ -202,6 +309,33 @@ class Results:
                                    f"tiebreak_winners[\"{game.week}\"]")
             a_wins = a_in
         game.winner, game.loser = (game.a, game.b) if a_wins else (game.b, game.a)
+
+
+def check_pairings(bowls: list["Bowl"], matchups: dict[int, list[dict]]) -> list[str]:
+    """Compare every bracket game whose two teams are known with the site's
+    pairings for that week. Returns one line per disagreement: a team the
+    site pairs with someone else, or doesn't list that week."""
+    problems = []
+    for week, games in matchups.items():
+        opponent = {}
+        for g in games:
+            opponent[_norm(g["a"])] = g["b"]
+            opponent[_norm(g["b"])] = g["a"]
+        if not opponent:
+            continue
+        for bowl in bowls:
+            for group in bowl.root.all_groups():
+                for rnd in group.rounds:
+                    for game in rnd:
+                        if game.week != int(week) or game.a is None or game.b is None:
+                            continue
+                        site_opp = opponent.get(_norm(game.a.name))
+                        if site_opp is None:
+                            problems.append(f"week {week} {bowl.key}: site doesn't list {game.a.name}")
+                        elif _norm(site_opp) != _norm(game.b.name):
+                            problems.append(f"week {week} {bowl.key}: bracket has {game.a.name} vs "
+                                            f"{game.b.name}, site has {game.a.name} vs {site_opp}")
+    return problems
 
 
 # --- building --------------------------------------------------------------
