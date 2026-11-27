@@ -74,6 +74,43 @@ def _play_yards(row: dict, col: str) -> int:
     return _yards(row)
 
 
+_YARDS_TEXT = r" for (no gain|-?\d+ yards?)"
+_SPOT_TEXT = r"(?: (?:to|pushed ob at|ran ob at) (?:[A-Z]{2,3} )?\d+)?"
+_CATCH_TEXT = re.compile(r"\bpass\b.*?\bto \d{1,2}-(.+?)" + _SPOT_TEXT + _YARDS_TEXT)
+_LATERAL_TEXT = re.compile(r"\bLateral to \d{1,2}-(.+?)(?: pushed ob| ran ob)?" + _SPOT_TEXT + _YARDS_TEXT)
+
+
+def _lateral_count(row: dict) -> int:
+    return (row.get("desc") or "").count("Lateral to ")
+
+
+def _reception_chain(row: dict) -> list[tuple[str, int]] | None:
+    """[(player, yards)] for a completed pass lateraled TWO or more times, in
+    order, starting with the receiver - or None if it can't be read safely.
+
+    nflverse has columns for the receiver and only ONE lateral recipient (the
+    last), so every ball carrier in between is missing from them (week 12,
+    CHI at DET: four laterals; J.Williams' +9, Gibbs' -6 and Goff's +3 were
+    lost). The play description lists every step. It is trusted only if the
+    steps add up exactly to the play's passing yards; plays with a fumble or a
+    replay reversal are left to a human.
+    """
+    desc = row.get("desc") or ""
+    if (row.get("complete_pass") != "1" or _lateral_count(row) < 2
+            or "FUMBLES" in desc or "REVERSED" in desc.upper()):
+        return None
+    desc = desc.split("PENALTY")[0]
+    first = _CATCH_TEXT.search(desc)
+    laterals = _LATERAL_TEXT.findall(desc)
+    if not first or len(laterals) != desc.count("Lateral to "):
+        return None
+    steps = [first.groups(), *laterals]
+    chain = [(name.strip(), 0 if y == "no gain" else int(y.split()[0])) for name, y in steps]
+    if chain[0][0] != row.get("receiver_player_name") or sum(y for _, y in chain) != _play_yards(row, "passing_yards"):
+        return None
+    return chain
+
+
 def _is_2pt_success(row: dict) -> bool:
     return row.get("two_point_attempt") == "1" and row.get("two_point_conv_result") == "success"
 
@@ -145,7 +182,9 @@ def offensive_player_stats(rows: list[dict], team: str) -> dict[str, dict]:
             p["att"] += 1
             if row.get("complete_pass") == "1":
                 p["comp"] += 1
-                p["pass_yds"] += _yards(row)
+                # The passer's own column, not the play's yards_gained: they
+                # disagree on a multi-lateral play (26 vs 11, week 12).
+                p["pass_yds"] += _play_yards(row, "passing_yards")
             if row.get("pass_touchdown") == "1":
                 p["pass_td"] += 1
             if row.get("interception") == "1":
@@ -164,7 +203,14 @@ def offensive_player_stats(rows: list[dict], team: str) -> dict[str, dict]:
                 p["rush_td"] += 1
 
         receiver = row.get("receiver_player_name")
-        if receiver and row.get("complete_pass") == "1" and not is_two_point_attempt:
+        chain = _reception_chain(row)
+        if receiver and chain and not is_two_point_attempt:
+            players[receiver]["rec"] += 1
+            for name, yards in chain:
+                players[name]["rec_yds"] += yards
+            if row.get("pass_touchdown") == "1":
+                players[row.get("td_player_name") or chain[-1][0]]["rec_td"] += 1
+        elif receiver and row.get("complete_pass") == "1" and not is_two_point_attempt:
             p = players[receiver]
             p["rec"] += 1
             p["rec_yds"] += _play_yards(row, "receiving_yards")
@@ -384,7 +430,9 @@ def defense_stats(rows: list[dict], team: str) -> dict:
             # GB@TB wk4 (86).
             if row.get("two_point_attempt") != "1":
                 if row.get("play_type") == "pass":
-                    stats["pass_yds_allowed"] += _yards(row)
+                    # passing_yards is empty on sacks, so those fall back to
+                    # their (negative) yards_gained: the total stays net.
+                    stats["pass_yds_allowed"] += _play_yards(row, "passing_yards")
                 elif row.get("play_type") in ("run", "qb_kneel"):
                     stats["rush_yds_allowed"] += _yards(row)
 
@@ -552,7 +600,11 @@ def find_yardage_anomalies(rows: list[dict], team: str) -> list[dict]:
     for row in rows:
         if row.get("posteam") != team or row.get("two_point_attempt") == "1":
             continue
+        if _reception_chain(row):
+            continue  # every step was read from the description and adds up
+        play_yards = _yards(row)
         if row.get("complete_pass") == "1" and row.get("receiver_player_name"):
+            play_yards = _play_yards(row, "passing_yards")
             own, extra, kind = _play_yards(row, "receiving_yards"), 0, "reception"
             if row.get("lateral_reception") == "1" and row.get("lateral_receiver_player_name"):
                 extra = _play_yards(row, "lateral_receiving_yards")
@@ -562,10 +614,12 @@ def find_yardage_anomalies(rows: list[dict], team: str) -> list[dict]:
                 extra = _play_yards(row, "lateral_rushing_yards")
         else:
             continue
-        if own + extra != _yards(row):
+        # A twice-lateraled play that couldn't be read is flagged even if the
+        # two recorded columns happen to add up: the middle carriers are missing.
+        if own + extra != play_yards or _lateral_count(row) >= 2:
             flagged.append({
                 "type": "yardage_mismatch", "kind": kind,
-                "credited_yards": own + extra, "play_yards": _yards(row), "desc": row.get("desc", ""),
+                "credited_yards": own + extra, "play_yards": play_yards, "desc": row.get("desc", ""),
             })
     return flagged
 
@@ -581,7 +635,13 @@ def find_lateral_plays(rows: list[dict], team: str) -> list[dict]:
     for row in rows:
         if row.get("posteam") != team:
             continue
-        if row.get("lateral_reception") == "1" and row.get("lateral_receiver_player_name"):
+        chain = _reception_chain(row)
+        if chain:
+            flagged.append({
+                "type": "lateral_play", "kind": "multi_reception", "chain": [list(step) for step in chain],
+                "touchdown": row.get("pass_touchdown") == "1", "desc": row.get("desc", ""),
+            })
+        elif row.get("lateral_reception") == "1" and row.get("lateral_receiver_player_name"):
             flagged.append({
                 "type": "lateral_play", "kind": "reception", "from": row.get("receiver_player_name"),
                 "to": row.get("lateral_receiver_player_name"),

@@ -523,6 +523,27 @@ in `stats.py`/`name_match.py`:
    (0 -> 1; TB's B.Irving fumbled out of ATL's end zone). CAR's week-11 form
    was corrected by hand (only the Fum Rec box). Week 8 was not re-entered.
 
+17. **A four-lateral play lost three ball carriers and 15 passing yards (fixed
+   week 12).** CHI at DET ended on a catch with four laterals (St. Brown +9,
+   J.Williams +9, Gibbs -6, Goff +3, Gibbs +11 = 26) and a 0-yard penalty. Two
+   bugs: (a) passing yards - the QB's and the defense's "Pass" allowed - were
+   summed from `yards_gained`, which said 11 for this play, instead of the
+   `passing_yards` column (26), so Goff was entered as 298 (not 313) and CHI's
+   defense as 288 (not 303); (b) nflverse has columns for the receiver and only
+   ONE lateral recipient, so J.Williams (+9), Gibbs' -6 and Goff's +3 were
+   lost (Williams entered 59 not 68, Gibbs 53 not 47). Now passing yards use
+   `passing_yards` (sacks, which leave it empty, still count as negative yards
+   allowed), and a completion lateraled two or more times is read step by step
+   from the play description (`stats._reception_chain`). The chain is trusted
+   only if it adds up exactly to the passing yards and has no fumble or replay
+   reversal; otherwise the old columns are used and the play is flagged for a
+   human (also when the columns happen to add up). The flag lists every step.
+   A QB's receiving yards (Goff's 3) have no box on FLFFL's QB form. Compared
+   old vs. new on all 330 team-games so far: only CHI/DET week 12 changes, and
+   it matches nfl.com. The four boxes were corrected by hand. This supersedes
+   item 8's description of the yardage check, which now compares against
+   passing yards for catches.
+
 If you're ever unsure whether a past week's numbers are trustworthy,
 cross-check a player or two against nfl.com's box score (Game Center →
 STATS tab) the way this was caught.
